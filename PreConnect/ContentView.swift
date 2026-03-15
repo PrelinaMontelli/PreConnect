@@ -31,6 +31,10 @@ private enum WidgetConfigurationStore {
     }
 }
 
+private enum PerformanceNotice {
+    static let pollingPausedOutsideDashboard = "为优化性能，监控面板外已暂停数据刷新"
+}
+
 struct ContentView: View {
     @StateObject private var vm = AppViewModel()
     @State private var showScanner = false
@@ -56,6 +60,14 @@ struct ContentView: View {
         activeSection == .dashboard && vm.isPaired
     }
 
+    private var shouldPauseTelemetryPolling: Bool {
+        vm.isPaired && activeSection == .settings
+    }
+
+    private var shouldShowPollingPausedNotice: Bool {
+        vm.isPaired && activeSection == .settings
+    }
+
     var body: some View {
         NavigationSplitView {
             SidebarView(selectedSection: $selectedSection, vm: vm)
@@ -63,6 +75,21 @@ struct ContentView: View {
             ZStack {
                 AppBackground()
                 detailContent
+            }
+            .overlay(alignment: .top) {
+                if shouldShowPollingPausedNotice {
+                    Text(PerformanceNotice.pollingPausedOutsideDashboard)
+                        .font(.caption2.weight(.medium))
+                        .foregroundStyle(Color(red: 0.22, green: 0.28, blue: 0.34))
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 7)
+                        .background(.ultraThinMaterial, in: Capsule())
+                        .overlay {
+                            Capsule()
+                                .stroke(Color.white.opacity(0.55), lineWidth: 1)
+                        }
+                        .padding(.top, 8)
+                }
             }
             .toolbar {
                 if isDashboardActive && isDashboardTopBarVisible {
@@ -72,7 +99,7 @@ struct ContentView: View {
                         }
 
                         Button {
-                            Task { await vm.refreshTelemetryOnce() }
+                            Task { await vm.refreshTelemetryOnce(showLoadingIndicator: true) }
                         } label: {
                             Label("刷新", systemImage: "arrow.clockwise")
                         }
@@ -95,6 +122,7 @@ struct ContentView: View {
             if vm.isPaired {
                 selectedSection = .dashboard
             }
+            vm.setTelemetryPollingEnabled(!shouldPauseTelemetryPolling)
         }
         .onChange(of: pollingInterval) { _, newValue in
             vm.updatePollingInterval(newValue)
@@ -110,12 +138,16 @@ struct ContentView: View {
                 cancelDashboardTopBarAutoHide()
                 isDashboardTopBarVisible = false
             }
+
+            vm.setTelemetryPollingEnabled(!shouldPauseTelemetryPolling)
         }
         .onChange(of: activeSection) { _, section in
             if section != .dashboard {
                 cancelDashboardTopBarAutoHide()
                 isDashboardTopBarVisible = false
             }
+
+            vm.setTelemetryPollingEnabled(!shouldPauseTelemetryPolling)
         }
     }
 
@@ -533,8 +565,12 @@ private struct DashboardCanvasView: View {
         GeometryReader { geometry in
             let usableWidth = max(geometry.size.width - canvasPadding * 2, 0)
             let usableHeight = max(geometry.size.height - canvasPadding * 2, 0)
+            let occupiedRowCount = max(
+                layoutResult.placements.map { $0.row + $0.span.rows }.max() ?? 1,
+                1
+            )
             let rawCellWidth = (usableWidth - cellSpacing * CGFloat(DashboardLayoutEngine.gridColumns - 1)) / CGFloat(DashboardLayoutEngine.gridColumns)
-            let rawCellHeight = (usableHeight - cellSpacing * CGFloat(DashboardLayoutEngine.gridRows - 1)) / CGFloat(DashboardLayoutEngine.gridRows)
+            let rawCellHeight = (usableHeight - cellSpacing * CGFloat(occupiedRowCount - 1)) / CGFloat(occupiedRowCount)
             let cellWidth = max(rawCellWidth, 20)
             let cellHeight = max(rawCellHeight, 20)
 
@@ -559,7 +595,7 @@ private struct DashboardCanvasView: View {
                 VStack {
                     HStack {
                         Spacer()
-                        Text("布局：\(layoutResult.scaleTier.title)")
+                        Text("布局：\(layoutResult.scaleTier.title) · \(occupiedRowCount) 行")
                             .font(.caption.weight(.semibold))
                             .padding(.horizontal, 10)
                             .padding(.vertical, 6)
@@ -607,13 +643,22 @@ private struct DashboardWidgetTile: View {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 4) {
                     Label(widget.sensor.sensorName, systemImage: widgetIcon)
-                        .font(.headline)
+                        .font(.headline.weight(.semibold))
+                        .foregroundStyle(Color(red: 0.12, green: 0.16, blue: 0.24))
+                        .labelStyle(DashboardWidgetTitleLabelStyle(accent: widget.sensor.iconTint, tint: widget.sensor.softTint))
                     Text(widget.sensor.componentName)
                         .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(2)
+                        .foregroundStyle(Color(red: 0.38, green: 0.43, blue: 0.52))
+                        .lineLimit(widget.config.displayMode == .chart ? 2 : 1)
                 }
                 Spacer()
+
+                Text(widget.sensor.sensorTypeLabel)
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(widget.sensor.iconTint)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 5)
+                    .background(widget.sensor.softTint, in: Capsule())
             }
 
             switch widget.config.displayMode {
@@ -627,7 +672,26 @@ private struct DashboardWidgetTile: View {
         }
         .padding(tilePadding)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(Color.white.opacity(0.86), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
+        .background(
+            ZStack {
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .fill(Color.white.opacity(0.88))
+
+                RoundedRectangle(cornerRadius: 22, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [widget.sensor.softTint, Color.white.opacity(0.02)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+            }
+        )
+        .overlay {
+            RoundedRectangle(cornerRadius: 22, style: .continuous)
+                .stroke(widget.sensor.lineTint, lineWidth: 1)
+        }
+        .shadow(color: Color.black.opacity(0.05), radius: 12, x: 0, y: 8)
     }
 
     private var widgetIcon: String {
@@ -635,6 +699,23 @@ private struct DashboardWidgetTile: View {
         case .chart: return "chart.xyaxis.line"
         case .value: return "number.square.fill"
         case .progress: return "gauge.with.needle.fill"
+        }
+    }
+}
+
+private struct DashboardWidgetTitleLabelStyle: LabelStyle {
+    let accent: Color
+    let tint: Color
+
+    func makeBody(configuration: Configuration) -> some View {
+        HStack(spacing: 10) {
+            configuration.icon
+                .font(.system(size: 12, weight: .bold))
+                .foregroundStyle(accent)
+                .frame(width: 26, height: 26)
+                .background(tint, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+
+            configuration.title
         }
     }
 }
@@ -649,28 +730,54 @@ private struct SensorWidgetChart: View {
                 .font(.system(size: 26, weight: .bold, design: .rounded))
                 .lineLimit(1)
                 .minimumScaleFactor(0.75)
-                .foregroundStyle(sensor.color)
+                .foregroundStyle(sensor.strongColor)
 
             if samples.isEmpty {
                 RoundedRectangle(cornerRadius: 18, style: .continuous)
-                    .fill(Color.secondary.opacity(0.08))
-                    .overlay { Text("等待数据").foregroundStyle(.secondary) }
+                    .fill(sensor.softTint.opacity(0.75))
+                    .overlay {
+                        Text("等待数据")
+                            .foregroundStyle(Color(red: 0.44, green: 0.48, blue: 0.56))
+                    }
             } else {
                 Chart(samples) { sample in
                     AreaMark(x: .value("时间", sample.timestamp), y: .value("数值", sample.value))
-                        .foregroundStyle(sensor.color.opacity(0.14))
+                        .foregroundStyle(
+                            LinearGradient(
+                                colors: [sensor.strongColor.opacity(0.26), sensor.strongColor.opacity(0.04)],
+                                startPoint: .top,
+                                endPoint: .bottom
+                            )
+                        )
                     LineMark(x: .value("时间", sample.timestamp), y: .value("数值", sample.value))
                         .interpolationMethod(.catmullRom)
                         .lineStyle(.init(lineWidth: 3, lineCap: .round))
-                        .foregroundStyle(sensor.color)
+                        .foregroundStyle(sensor.strongColor)
+
+                    if let latest = samples.last, latest.id == sample.id {
+                        PointMark(x: .value("时间", sample.timestamp), y: .value("数值", sample.value))
+                            .symbolSize(40)
+                            .foregroundStyle(sensor.strongColor)
+                        PointMark(x: .value("时间", sample.timestamp), y: .value("数值", sample.value))
+                            .symbolSize(100)
+                            .foregroundStyle(sensor.strongColor.opacity(0.16))
+                    }
                 }
                 .chartXAxis(.hidden)
                 .chartYAxis {
                     AxisMarks(position: .leading) { _ in
-                        AxisGridLine()
-                        AxisTick()
+                        AxisGridLine(stroke: StrokeStyle(lineWidth: 1, dash: [3, 4]))
+                            .foregroundStyle(sensor.lineTint)
+                        AxisTick(stroke: StrokeStyle(lineWidth: 1))
+                            .foregroundStyle(sensor.lineTint)
                         AxisValueLabel()
+                            .foregroundStyle(Color(red: 0.46, green: 0.50, blue: 0.57))
                     }
+                }
+                .chartPlotStyle { plotArea in
+                    plotArea
+                        .background(sensor.softTint.opacity(0.35))
+                        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
                 }
             }
         }
@@ -682,20 +789,27 @@ private struct ValueWidgetContent: View {
     let sensor: SensorDisplayItem
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 3) {
-            Text(sensor.valueText)
-                .font(.system(size: 26, weight: .bold, design: .rounded))
-                .monospacedDigit()
-                .lineLimit(1)
-                .minimumScaleFactor(0.72)
-                .foregroundStyle(sensor.color)
-            Text(sensor.valueSummaryText)
-                .font(.caption2)
-                .lineLimit(1)
-                .minimumScaleFactor(0.8)
-                .foregroundStyle(.secondary)
+        GeometryReader { proxy in
+            let isTight = proxy.size.height < 112
+
+            VStack(alignment: .leading, spacing: isTight ? 2 : 4) {
+                Text(sensor.valueText)
+                    .font(.system(size: isTight ? 22 : 26, weight: .bold, design: .rounded))
+                    .monospacedDigit()
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.72)
+                    .foregroundStyle(sensor.strongColor)
+
+                if !isTight {
+                    Text(sensor.valueSummaryText)
+                        .font(.caption2)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                        .foregroundStyle(Color(red: 0.41, green: 0.45, blue: 0.53))
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 }
 
@@ -703,18 +817,24 @@ private struct ProgressWidgetContent: View {
     let sensor: SensorDisplayItem
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 5) {
-            Text(sensor.valueText)
-                .font(.system(size: 24, weight: .bold, design: .rounded))
-                .monospacedDigit()
-                .lineLimit(1)
-                .minimumScaleFactor(0.72)
-                .foregroundStyle(sensor.color)
+        GeometryReader { proxy in
+            let isTight = proxy.size.height < 112
 
-            ProgressView(value: sensor.progressFraction ?? inferredFraction)
-                .tint(sensor.color)
+            VStack(alignment: .leading, spacing: isTight ? 4 : 7) {
+                Text(sensor.valueText)
+                    .font(.system(size: isTight ? 21 : 24, weight: .bold, design: .rounded))
+                    .monospacedDigit()
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.72)
+                    .foregroundStyle(sensor.strongColor)
+
+                ProgressView(value: sensor.progressFraction ?? inferredFraction)
+                    .controlSize(isTight ? .small : .regular)
+                    .tint(sensor.strongColor)
+                    .background(Color.white.opacity(0.7), in: Capsule())
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
     private var inferredFraction: Double {
@@ -999,10 +1119,12 @@ private struct DashboardEmptyCustomizationView: View {
 }
 
 private struct SettingsView: View {
-    @ObservedObject var vm: AppViewModel
+    let vm: AppViewModel
     @AppStorage(DashboardPreferenceKey.widgetConfigurations) private var widgetConfigurationsRaw = "[]"
     @AppStorage(DashboardPreferenceKey.pollingInterval) private var pollingInterval = AppViewModel.defaultPollingInterval
     @State private var warningMessage: String?
+    @State private var frozenSensorGroups: [(category: SensorCategory, sensors: [SensorDisplayItem])] = []
+    @State private var frozenSession: SessionInfo?
 
     private var widgetConfigurations: [DashboardWidgetConfig] {
         WidgetConfigurationStore.decode(widgetConfigurationsRaw)
@@ -1060,6 +1182,9 @@ private struct SettingsView: View {
             Text(warningMessage ?? "")
         }
         .onAppear {
+            frozenSensorGroups = vm.sensorsByCategory
+            frozenSession = vm.session
+
             vm.updatePollingInterval(pollingInterval)
             if widgetConfigurations.isEmpty {
                 let defaults = vm.defaultWidgetConfigs()
@@ -1078,11 +1203,11 @@ private struct SettingsView: View {
             VStack(alignment: .leading, spacing: 16) {
                 SectionHeader(title: "仪表盘组件", subtitle: "为每个传感器选择合适的展示模式", symbolName: "square.grid.3x3.topleft.filled")
 
-                if vm.sensorsByCategory.isEmpty {
+                if frozenSensorGroups.isEmpty {
                     Text("等待遥测数据后才能配置仪表盘组件。")
                         .foregroundStyle(.secondary)
                 } else {
-                    ForEach(vm.sensorsByCategory, id: \.category.id) { group in
+                    ForEach(frozenSensorGroups, id: \.category.id) { group in
                         SensorCategorySection(
                             title: group.category.title,
                             sensors: group.sensors,
@@ -1130,7 +1255,7 @@ private struct SettingsView: View {
             VStack(alignment: .leading, spacing: 16) {
                 SectionHeader(title: "连接控制", subtitle: "管理当前配对会话", symbolName: "lock.shield.fill")
 
-                if let session = vm.session {
+                if let session = frozenSession {
                     StatusFactRow(title: "当前主机", value: session.serverName, symbolName: "desktopcomputer")
                     StatusFactRow(title: "远端地址", value: session.endpoint.absoluteString, symbolName: "network")
                     if let expiresAt = session.expiresAt {
@@ -1138,6 +1263,7 @@ private struct SettingsView: View {
                     }
 
                     Button(role: .destructive) {
+                        frozenSession = nil
                         vm.disconnect()
                     } label: {
                         Label("断开当前会话", systemImage: "xmark.circle.fill")
@@ -1203,6 +1329,8 @@ private struct SettingsView: View {
 }
 
 private struct SensorCategorySection: View {
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+
     let title: String
     let sensors: [SensorDisplayItem]
     let selectedMode: (String) -> DashboardWidgetDisplayMode?
@@ -1215,17 +1343,43 @@ private struct SensorCategorySection: View {
             Text(title)
                 .font(.title3.bold())
 
-            LazyVGrid(columns: [GridItem(.adaptive(minimum: 300), spacing: 14)], spacing: 14) {
-                ForEach(sensors) { sensor in
-                    SensorConfiguratorCard(
-                        sensor: sensor,
-                        selectedMode: selectedMode(sensor.id),
-                        canSelectMode: { mode in canSelectMode(mode, sensor) },
-                        onSelect: { mode in onSelect(mode, sensor) },
-                        onRemove: { onRemove(sensor.id) }
-                    )
+            VStack(spacing: 14) {
+                ForEach(Array(sensorRows.enumerated()), id: \.offset) { _, rowSensors in
+                    HStack(alignment: .top, spacing: 14) {
+                        ForEach(rowSensors) { sensor in
+                            SensorConfiguratorCard(
+                                sensor: sensor,
+                                selectedMode: selectedMode(sensor.id),
+                                canSelectMode: { mode in canSelectMode(mode, sensor) },
+                                onSelect: { mode in onSelect(mode, sensor) },
+                                onRemove: { onRemove(sensor.id) }
+                            )
+                            .frame(maxWidth: .infinity, alignment: .topLeading)
+                        }
+
+                        if rowSensors.count < columnCount {
+                            ForEach(0..<(columnCount - rowSensors.count), id: \.self) { _ in
+                                Color.clear
+                                    .frame(maxWidth: .infinity)
+                            }
+                        }
+                    }
                 }
             }
+        }
+    }
+
+    private var columnCount: Int {
+        horizontalSizeClass == .regular ? 2 : 1
+    }
+
+    private var sensorRows: [[SensorDisplayItem]] {
+        guard !sensors.isEmpty else { return [] }
+
+        let count = max(columnCount, 1)
+        return stride(from: 0, to: sensors.count, by: count).map { start in
+            let end = min(start + count, sensors.count)
+            return Array(sensors[start..<end])
         }
     }
 }

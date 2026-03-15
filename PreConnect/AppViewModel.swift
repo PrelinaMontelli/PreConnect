@@ -30,32 +30,27 @@ final class AppViewModel: ObservableObject {
     @Published var isLoading: Bool = false
     @Published var qrPhase: QRScanPhase = .idle
     @Published var cameraError: String?
+    @Published private(set) var flattenedSensorsCache: [SensorDisplayItem] = []
+    @Published private(set) var chartableSensorsCache: [SensorDisplayItem] = []
+    @Published private(set) var sensorsByCategoryCache: [(category: SensorCategory, sensors: [SensorDisplayItem])] = []
 
     private let client = APIClient()
     private var pollTask: Task<Void, Never>?
     private let localDeviceId = UIDevice.current.identifierForVendor?.uuidString ?? UUID().uuidString
     private let localDeviceName = UIDevice.current.name
 
+    private struct TelemetryDerivedData: Sendable {
+        let flattenedSensors: [SensorDisplayItem]
+        let chartableSensors: [SensorDisplayItem]
+        let sensorsByCategory: [(category: SensorCategory, sensors: [SensorDisplayItem])]
+        let history: [String: [MetricSample]]
+        let updatedAt: Date
+    }
+
     var isPaired: Bool { session != nil }
 
     var flattenedSensors: [SensorDisplayItem] {
-        guard let snapshot else { return [] }
-        return snapshot.components
-            .flatMap(\.allComponents)
-            .flatMap { component in
-                component.sensors.map { sensor in
-                    SensorDisplayItem(
-                        id: sensor.sensorId,
-                        componentName: component.hardwareName,
-                        sensorName: sensor.sensorName,
-                        sensorType: sensor.sensorType,
-                        value: sensor.value,
-                        min: sensor.min,
-                        max: sensor.max,
-                        hardwarePath: sensor.hardwarePath
-                    )
-                }
-            }
+        flattenedSensorsCache
     }
 
     var availableSensors: [SensorDisplayItem] {
@@ -63,23 +58,11 @@ final class AppViewModel: ObservableObject {
     }
 
     var chartableSensors: [SensorDisplayItem] {
-        flattenedSensors
-            .sorted { lhs, rhs in
-                if (lhs.value != nil) != (rhs.value != nil) {
-                    return lhs.value != nil
-                }
-                if lhs.componentName != rhs.componentName {
-                    return lhs.componentName < rhs.componentName
-                }
-                return lhs.sensorName < rhs.sensorName
-            }
+        chartableSensorsCache
     }
 
     var sensorsByCategory: [(category: SensorCategory, sensors: [SensorDisplayItem])] {
-        SensorCategory.allCases.compactMap { category in
-            let sensors = chartableSensors.filter { $0.category == category }
-            return sensors.isEmpty ? nil : (category, sensors)
-        }
+        sensorsByCategoryCache
     }
 
     var dashboardFacts: [DashboardFact] {
@@ -157,7 +140,7 @@ final class AppViewModel: ObservableObject {
                 session = info
                 Task {
                     startPolling()
-                    await refreshTelemetryOnce()
+                    await refreshTelemetryOnce(showLoadingIndicator: false)
                 }
             } else {
                 PersistedSession.wipe()
@@ -213,7 +196,7 @@ final class AppViewModel: ObservableObject {
             ).persist()
 
             startPolling()
-            await refreshTelemetryOnce()
+            await refreshTelemetryOnce(showLoadingIndicator: true)
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -282,7 +265,7 @@ final class AppViewModel: ObservableObject {
 
             qrPhase = .success
             startPolling()
-            await refreshTelemetryOnce()
+            await refreshTelemetryOnce(showLoadingIndicator: false)
 
         } catch let err as APIClientError {
             switch err {
@@ -307,18 +290,35 @@ final class AppViewModel: ObservableObject {
 
     // MARK: - Telemetry
 
-    func refreshTelemetryOnce() async {
+    func refreshTelemetryOnce(showLoadingIndicator: Bool = false) async {
         guard let session else { return }
 
         do {
-            isLoading = true
+            if showLoadingIndicator {
+                isLoading = true
+            }
             errorMessage = nil
             let data = try await client.telemetry(baseURL: session.endpoint, token: session.token)
-            snapshot = data.snapshot
-            lastUpdatedAt = Date()
 
             if let snapshot = data.snapshot {
-                updateMetricHistory(using: snapshot)
+                let existingHistory = sensorHistory
+                let derived = await Task.detached(priority: .userInitiated) {
+                    Self.deriveTelemetryData(snapshot: snapshot, existingHistory: existingHistory)
+                }.value
+
+                self.snapshot = snapshot
+                self.lastUpdatedAt = derived.updatedAt
+                self.sensorHistory = derived.history
+                self.flattenedSensorsCache = derived.flattenedSensors
+                self.chartableSensorsCache = derived.chartableSensors
+                self.sensorsByCategoryCache = derived.sensorsByCategory
+            } else {
+                self.snapshot = nil
+                self.lastUpdatedAt = Date()
+                self.sensorHistory = [:]
+                self.flattenedSensorsCache = []
+                self.chartableSensorsCache = []
+                self.sensorsByCategoryCache = []
             }
         } catch APIClientError.unauthorized {
             handleSessionExpired()
@@ -326,7 +326,9 @@ final class AppViewModel: ObservableObject {
             errorMessage = error.localizedDescription
         }
 
-        isLoading = false
+        if showLoadingIndicator {
+            isLoading = false
+        }
     }
 
     private func handleSessionExpired() {
@@ -334,18 +336,41 @@ final class AppViewModel: ObservableObject {
         session = nil
         snapshot = nil
         sensorHistory = [:]
+        flattenedSensorsCache = []
+        chartableSensorsCache = []
+        sensorsByCategoryCache = []
         PersistedSession.wipe()
         errorMessage = "会话已过期，请重新扫码配对"
     }
 
     func disconnect() {
         pollTask?.cancel()
+        pollTask = nil
         session = nil
         snapshot = nil
         status = nil
         sensorHistory = [:]
+        flattenedSensorsCache = []
+        chartableSensorsCache = []
+        sensorsByCategoryCache = []
         lastUpdatedAt = nil
         PersistedSession.wipe()
+    }
+
+    func setTelemetryPollingEnabled(_ isEnabled: Bool) {
+        guard isPaired else {
+            pollTask?.cancel()
+            pollTask = nil
+            return
+        }
+
+        if isEnabled {
+            startPolling()
+        } else {
+            pollTask?.cancel()
+            pollTask = nil
+            isLoading = false
+        }
     }
 
     func updatePollingInterval(_ seconds: TimeInterval) {
@@ -385,14 +410,14 @@ final class AppViewModel: ObservableObject {
 
     func defaultChartSensorIDs(limit: Int = 6) -> [String] {
         availableSensors
-            .sorted { lhs, rhs in chartPriority(for: lhs) > chartPriority(for: rhs) }
+            .sorted { lhs, rhs in Self.chartPriority(for: lhs) > Self.chartPriority(for: rhs) }
             .prefix(limit)
             .map(\.id)
     }
 
     func defaultWidgetConfigs(limit: Int = 6) -> [DashboardWidgetConfig] {
         availableSensors
-            .sorted { lhs, rhs in chartPriority(for: lhs) > chartPriority(for: rhs) }
+            .sorted { lhs, rhs in Self.chartPriority(for: lhs) > Self.chartPriority(for: rhs) }
             .prefix(limit)
             .map { sensor in
                 let mode: DashboardWidgetDisplayMode = sensor.supportedDisplayModes.contains(.progress) ? .progress : .value
@@ -412,7 +437,8 @@ final class AppViewModel: ObservableObject {
         pollTask?.cancel()
         pollTask = Task { [weak self] in
             while !Task.isCancelled {
-                await self?.refreshTelemetryOnce()
+                await self?.refreshTelemetryOnce(showLoadingIndicator: false)
+                
                 let interval = self?.pollingInterval ?? Self.defaultPollingInterval
                 try? await Task.sleep(for: .seconds(interval))
             }
@@ -426,7 +452,7 @@ final class AppViewModel: ObservableObject {
         return url
     }
 
-    private func updateMetricHistory(using snapshot: HardwareSnapshot) {
+    private nonisolated static func deriveTelemetryData(snapshot: HardwareSnapshot, existingHistory: [String: [MetricSample]]) -> TelemetryDerivedData {
         let sensors = snapshot.components
             .flatMap(\.allComponents)
             .flatMap { component in
@@ -446,7 +472,7 @@ final class AppViewModel: ObservableObject {
 
         let now = Date()
 
-        var nextHistory = sensorHistory
+        var nextHistory = existingHistory
         let activeSensorIDs = Set(sensors.compactMap { sensor in
             sensor.value == nil ? nil : sensor.id
         })
@@ -461,10 +487,32 @@ final class AppViewModel: ObservableObject {
             nextHistory[sensor.id] = samples
         }
 
-        sensorHistory = nextHistory.filter { activeSensorIDs.contains($0.key) }
+        let filteredHistory = nextHistory.filter { activeSensorIDs.contains($0.key) }
+        let chartableSensors = sensors
+            .sorted { lhs, rhs in
+                if (lhs.value != nil) != (rhs.value != nil) {
+                    return lhs.value != nil
+                }
+                if lhs.componentName != rhs.componentName {
+                    return lhs.componentName < rhs.componentName
+                }
+                return lhs.sensorName < rhs.sensorName
+            }
+        let sensorsByCategory = SensorCategory.allCases.compactMap { category in
+            let grouped = chartableSensors.filter { $0.category == category }
+            return grouped.isEmpty ? nil : (category: category, sensors: grouped)
+        }
+
+        return TelemetryDerivedData(
+            flattenedSensors: sensors,
+            chartableSensors: chartableSensors,
+            sensorsByCategory: sensorsByCategory,
+            history: filteredHistory,
+            updatedAt: now
+        )
     }
 
-    private func chartPriority(for item: SensorDisplayItem) -> Int {
+    private nonisolated static func chartPriority(for item: SensorDisplayItem) -> Int {
         var score = 0
         let text = item.searchText
 

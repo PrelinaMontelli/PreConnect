@@ -60,11 +60,11 @@ struct TelemetryResponse: Decodable {
     let snapshot: HardwareSnapshot?
 }
 
-struct HardwareSnapshot: Decodable {
+struct HardwareSnapshot: Decodable, Sendable {
     let components: [HardwareComponent]
 }
 
-struct HardwareComponent: Decodable {
+struct HardwareComponent: Decodable, Sendable {
     let hardwareId: String
     let hardwareName: String
     let hardwareType: Int
@@ -78,7 +78,7 @@ struct HardwareComponent: Decodable {
     }
 }
 
-struct SensorReading: Decodable {
+struct SensorReading: Decodable, Sendable {
     let sensorId: String
     let sensorName: String
     let sensorType: Int
@@ -98,7 +98,7 @@ struct SessionInfo {
     let deviceName: String
 }
 
-struct MetricSample: Identifiable {
+struct MetricSample: Identifiable, Sendable {
     let id = UUID()
     let timestamp: Date
     let value: Double
@@ -198,9 +198,19 @@ enum DashboardWidgetDisplayMode: String, CaseIterable, Codable, Identifiable {
                 return DashboardGridSpan(columns: 4, rows: 2)
             }
         case .value:
-            return DashboardGridSpan(columns: 3, rows: 1)
+            switch tier {
+            case .normal:
+                return DashboardGridSpan(columns: 3, rows: 2)
+            case .compact:
+                return DashboardGridSpan(columns: 3, rows: 1)
+            }
         case .progress:
-            return DashboardGridSpan(columns: 3, rows: 1)
+            switch tier {
+            case .normal:
+                return DashboardGridSpan(columns: 3, rows: 2)
+            case .compact:
+                return DashboardGridSpan(columns: 3, rows: 1)
+            }
         }
     }
 }
@@ -253,7 +263,7 @@ struct DashboardLayoutResult {
 }
 
 enum DashboardLayoutEngine {
-    static let gridColumns = 14
+    static let gridColumns = 13
     static let gridRows = 7
 
     static func layout(for widgets: [DashboardWidgetConfig]) -> DashboardLayoutResult {
@@ -339,7 +349,7 @@ enum DashboardLayoutEngine {
     }
 }
 
-enum SensorCategory: String, CaseIterable, Identifiable {
+enum SensorCategory: String, CaseIterable, Identifiable, Sendable {
     case temperature
     case power
     case fan
@@ -408,7 +418,7 @@ struct DashboardFact: Identifiable {
     let symbolName: String
 }
 
-struct SensorDisplayItem: Identifiable {
+struct SensorDisplayItem: Identifiable, Sendable {
     let id: String
     let componentName: String
     let sensorName: String
@@ -482,6 +492,41 @@ struct SensorDisplayItem: Identifiable {
         default:
             return .indigo
         }
+    }
+
+    var strongColor: Color {
+        switch sensorType {
+        case 4:
+            guard let value else { return Color(red: 0.46, green: 0.50, blue: 0.57) }
+            if value >= 90 { return Color(red: 0.79, green: 0.18, blue: 0.19) }
+            if value >= 70 { return Color(red: 0.86, green: 0.45, blue: 0.12) }
+            return Color(red: 0.14, green: 0.55, blue: 0.37)
+        case 5:
+            guard let value else { return Color(red: 0.46, green: 0.50, blue: 0.57) }
+            if value >= 90 { return Color(red: 0.79, green: 0.18, blue: 0.19) }
+            if value >= 70 { return Color(red: 0.86, green: 0.45, blue: 0.12) }
+            return Color(red: 0.14, green: 0.42, blue: 0.86)
+        case 2:
+            return Color(red: 0.79, green: 0.57, blue: 0.09)
+        case 7:
+            return Color(red: 0.00, green: 0.55, blue: 0.59)
+        case 3, 14:
+            return Color(red: 0.32, green: 0.34, blue: 0.76)
+        default:
+            return Color(red: 0.39, green: 0.40, blue: 0.78)
+        }
+    }
+
+    var softTint: Color {
+        strongColor.opacity(0.12)
+    }
+
+    var lineTint: Color {
+        strongColor.opacity(0.20)
+    }
+
+    var iconTint: Color {
+        strongColor.opacity(0.92)
     }
 
     var section: SensorSection? {
