@@ -193,14 +193,14 @@ enum DashboardWidgetDisplayMode: String, CaseIterable, Codable, Identifiable {
         case .chart:
             switch tier {
             case .normal:
-                return DashboardGridSpan(columns: 6, rows: 3)
+                return DashboardGridSpan(columns: 5, rows: 2)
             case .compact:
-                return DashboardGridSpan(columns: 4, rows: 3)
+                return DashboardGridSpan(columns: 4, rows: 2)
             }
         case .value:
-            return DashboardGridSpan(columns: 3, rows: 2)
+            return DashboardGridSpan(columns: 3, rows: 1)
         case .progress:
-            return DashboardGridSpan(columns: 3, rows: 2)
+            return DashboardGridSpan(columns: 3, rows: 1)
         }
     }
 }

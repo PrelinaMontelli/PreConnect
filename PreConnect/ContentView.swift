@@ -35,6 +35,8 @@ struct ContentView: View {
     @StateObject private var vm = AppViewModel()
     @State private var showScanner = false
     @State private var selectedSection: AppSection? = .setup
+    @State private var isDashboardTopBarVisible = false
+    @State private var dashboardTopBarHideTask: Task<Void, Never>?
     @AppStorage(DashboardPreferenceKey.pollingInterval) private var pollingInterval = AppViewModel.defaultPollingInterval
 
     private var showError: Binding<Bool> {
@@ -50,6 +52,10 @@ struct ContentView: View {
         selectedSection ?? (vm.isPaired ? .dashboard : .setup)
     }
 
+    private var isDashboardActive: Bool {
+        activeSection == .dashboard && vm.isPaired
+    }
+
     var body: some View {
         NavigationSplitView {
             SidebarView(selectedSection: $selectedSection, vm: vm)
@@ -59,7 +65,7 @@ struct ContentView: View {
                 detailContent
             }
             .toolbar {
-                if activeSection == .dashboard && vm.isPaired {
+                if isDashboardActive && isDashboardTopBarVisible {
                     ToolbarItemGroup(placement: .topBarTrailing) {
                         if vm.isLoading {
                             ProgressView()
@@ -73,6 +79,7 @@ struct ContentView: View {
                     }
                 }
             }
+            .toolbar(isDashboardActive && !isDashboardTopBarVisible ? .hidden : .visible, for: .navigationBar)
         }
         .navigationSplitViewStyle(.balanced)
         .alert("错误", isPresented: showError) {
@@ -98,6 +105,17 @@ struct ContentView: View {
             } else if selectedSection == .dashboard {
                 selectedSection = .setup
             }
+
+            if !isPaired {
+                cancelDashboardTopBarAutoHide()
+                isDashboardTopBarVisible = false
+            }
+        }
+        .onChange(of: activeSection) { _, section in
+            if section != .dashboard {
+                cancelDashboardTopBarAutoHide()
+                isDashboardTopBarVisible = false
+            }
         }
     }
 
@@ -108,13 +126,40 @@ struct ContentView: View {
             SetupWorkspaceView(vm: vm, showScanner: $showScanner)
         case .dashboard:
             if vm.isPaired {
-                DashboardView(vm: vm)
+                DashboardView(vm: vm, onUserInteraction: revealDashboardTopBarTemporarily)
             } else {
                 DashboardLockedView(selectedSection: $selectedSection)
             }
         case .settings:
             SettingsView(vm: vm)
         }
+    }
+
+    private func revealDashboardTopBarTemporarily() {
+        guard isDashboardActive else { return }
+
+        if !isDashboardTopBarVisible {
+            withAnimation(.easeInOut(duration: 0.2)) {
+                isDashboardTopBarVisible = true
+            }
+        }
+
+        cancelDashboardTopBarAutoHide()
+        dashboardTopBarHideTask = Task {
+            try? await Task.sleep(for: .seconds(3))
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                guard isDashboardActive else { return }
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    isDashboardTopBarVisible = false
+                }
+            }
+        }
+    }
+
+    private func cancelDashboardTopBarAutoHide() {
+        dashboardTopBarHideTask?.cancel()
+        dashboardTopBarHideTask = nil
     }
 }
 
@@ -419,6 +464,7 @@ private struct SetupStatusCard: View {
 
 private struct DashboardView: View {
     @ObservedObject var vm: AppViewModel
+    let onUserInteraction: () -> Void
     @AppStorage(DashboardPreferenceKey.widgetConfigurations) private var widgetConfigurationsRaw = "[]"
 
     private var widgetConfigurations: [DashboardWidgetConfig] {
@@ -449,6 +495,17 @@ private struct DashboardView: View {
         .padding(.horizontal, 8)
         .padding(.vertical, 6)
         .navigationBarTitleDisplayMode(.inline)
+        .contentShape(Rectangle())
+        .simultaneousGesture(
+            TapGesture().onEnded {
+                onUserInteraction()
+            }
+        )
+        .simultaneousGesture(
+            DragGesture(minimumDistance: 0).onChanged { _ in
+                onUserInteraction()
+            }
+        )
         .onAppear {
             ensureDefaultWidgetsIfNeeded()
         }
@@ -537,8 +594,16 @@ private struct DashboardCanvasView: View {
 private struct DashboardWidgetTile: View {
     let widget: DashboardWidgetState
 
+    private var tileSpacing: CGFloat {
+        widget.config.displayMode == .chart ? 14 : 9
+    }
+
+    private var tilePadding: CGFloat {
+        widget.config.displayMode == .chart ? 18 : 12
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: tileSpacing) {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 4) {
                     Label(widget.sensor.sensorName, systemImage: widgetIcon)
@@ -560,7 +625,7 @@ private struct DashboardWidgetTile: View {
                 ProgressWidgetContent(sensor: widget.sensor)
             }
         }
-        .padding(18)
+        .padding(tilePadding)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         .background(Color.white.opacity(0.86), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
     }
@@ -579,9 +644,11 @@ private struct SensorWidgetChart: View {
     let sensor: SensorDisplayItem
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 8) {
             Text(sensor.valueText)
-                .font(.system(size: 30, weight: .bold, design: .rounded))
+                .font(.system(size: 26, weight: .bold, design: .rounded))
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
                 .foregroundStyle(sensor.color)
 
             if samples.isEmpty {
@@ -615,17 +682,20 @@ private struct ValueWidgetContent: View {
     let sensor: SensorDisplayItem
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Spacer()
+        VStack(alignment: .leading, spacing: 3) {
             Text(sensor.valueText)
-                .font(.system(size: 32, weight: .bold, design: .rounded))
+                .font(.system(size: 26, weight: .bold, design: .rounded))
                 .monospacedDigit()
+                .lineLimit(1)
+                .minimumScaleFactor(0.72)
                 .foregroundStyle(sensor.color)
             Text(sensor.valueSummaryText)
-                .font(.caption)
+                .font(.caption2)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
                 .foregroundStyle(.secondary)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 }
 
@@ -633,21 +703,18 @@ private struct ProgressWidgetContent: View {
     let sensor: SensorDisplayItem
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Spacer()
+        VStack(alignment: .leading, spacing: 5) {
             Text(sensor.valueText)
-                .font(.system(size: 30, weight: .bold, design: .rounded))
+                .font(.system(size: 24, weight: .bold, design: .rounded))
                 .monospacedDigit()
+                .lineLimit(1)
+                .minimumScaleFactor(0.72)
                 .foregroundStyle(sensor.color)
 
             ProgressView(value: sensor.progressFraction ?? inferredFraction)
                 .tint(sensor.color)
-
-            Text(sensor.valueSummaryText)
-                .font(.caption)
-                .foregroundStyle(.secondary)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
     private var inferredFraction: Double {
