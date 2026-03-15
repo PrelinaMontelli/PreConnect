@@ -36,6 +36,7 @@ final class AppViewModel: ObservableObject {
 
     private let client = APIClient()
     private var pollTask: Task<Void, Never>?
+    private var telemetryPollingEnabled = true
     private let localDeviceId = UIDevice.current.identifierForVendor?.uuidString ?? UUID().uuidString
     private let localDeviceName = UIDevice.current.name
 
@@ -138,6 +139,7 @@ final class AppViewModel: ObservableObject {
             let isValid = info.expiresAt.map { $0 > Date() } ?? true
             if isValid {
                 session = info
+                telemetryPollingEnabled = true
                 Task {
                     startPolling()
                     await refreshTelemetryOnce(showLoadingIndicator: false)
@@ -322,6 +324,10 @@ final class AppViewModel: ObservableObject {
             }
         } catch APIClientError.unauthorized {
             handleSessionExpired()
+        } catch is CancellationError {
+            // Polling cancellation during section switches is expected.
+        } catch let urlError as URLError where urlError.code == .cancelled {
+            // URLSession cancellation should not surface as a user-facing error.
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -333,6 +339,8 @@ final class AppViewModel: ObservableObject {
 
     private func handleSessionExpired() {
         pollTask?.cancel()
+        pollTask = nil
+        telemetryPollingEnabled = false
         session = nil
         snapshot = nil
         sensorHistory = [:]
@@ -346,6 +354,7 @@ final class AppViewModel: ObservableObject {
     func disconnect() {
         pollTask?.cancel()
         pollTask = nil
+        telemetryPollingEnabled = false
         session = nil
         snapshot = nil
         status = nil
@@ -358,17 +367,25 @@ final class AppViewModel: ObservableObject {
     }
 
     func setTelemetryPollingEnabled(_ isEnabled: Bool) {
+        let shouldEnable = isEnabled && isPaired
+        if shouldEnable {
+            if !telemetryPollingEnabled || pollTask == nil {
+                telemetryPollingEnabled = true
+                startPolling()
+            }
+            return
+        }
+
+        telemetryPollingEnabled = false
         guard isPaired else {
             pollTask?.cancel()
             pollTask = nil
             return
         }
 
-        if isEnabled {
-            startPolling()
-        } else {
-            pollTask?.cancel()
-            pollTask = nil
+        pollTask?.cancel()
+        pollTask = nil
+        if isLoading {
             isLoading = false
         }
     }
@@ -434,6 +451,7 @@ final class AppViewModel: ObservableObject {
     }
 
     private func startPolling() {
+        telemetryPollingEnabled = true
         pollTask?.cancel()
         pollTask = Task { [weak self] in
             while !Task.isCancelled {

@@ -49,6 +49,9 @@
     <key>UIApplicationSupportsIndirectInputEvents</key>
     <true/>
 
+    <key>UIRequiresFullScreen</key>
+    <true/>
+
     <key>UIApplicationSceneManifest</key>
     <dict>
         <key>UIApplicationSupportsMultipleScenes</key>

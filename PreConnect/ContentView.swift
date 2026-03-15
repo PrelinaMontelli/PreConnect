@@ -36,6 +36,7 @@ private enum PerformanceNotice {
 }
 
 struct ContentView: View {
+    @Environment(\.colorScheme) private var colorScheme
     @StateObject private var vm = AppViewModel()
     @State private var showScanner = false
     @State private var selectedSection: AppSection? = .setup
@@ -80,7 +81,7 @@ struct ContentView: View {
                 if shouldShowPollingPausedNotice {
                     Text(PerformanceNotice.pollingPausedOutsideDashboard)
                         .font(.caption2.weight(.medium))
-                        .foregroundStyle(Color(red: 0.22, green: 0.28, blue: 0.34))
+                        .foregroundStyle(colorScheme == .dark ? Color.white : Color.black)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 7)
                         .background(.ultraThinMaterial, in: Capsule())
@@ -238,7 +239,7 @@ private struct SidebarView: View {
             }
         }
         .scrollContentBackground(.hidden)
-        .background(Color.clear)
+        .background(AppBackground())
         .navigationTitle("PreConnect")
     }
 }
@@ -250,247 +251,69 @@ private struct SetupWorkspaceView: View {
     var body: some View {
         GeometryReader { geometry in
             ScrollView {
-                VStack(alignment: .leading, spacing: 24) {
-                    SetupHeroCard(vm: vm)
+                VStack {
+                    Spacer(minLength: max(geometry.size.height * 0.12, 40))
 
-                    LazyVGrid(columns: setupColumns(for: geometry.size.width), spacing: 20) {
-                        ConnectionCard(vm: vm)
-                        PairingCard(vm: vm, showScanner: $showScanner)
-                        SetupStatusCard(vm: vm)
-                    }
+                    SetupPairingFocusView(
+                        isPaired: vm.isPaired,
+                        onScanTap: {
+                            vm.startQRScanning()
+                            showScanner = true
+                        }
+                    )
+
+                    Spacer(minLength: max(geometry.size.height * 0.12, 40))
                 }
-                .frame(maxWidth: 1320)
-                .padding(.horizontal, 28)
-                .padding(.vertical, 24)
+                .frame(maxWidth: .infinity, minHeight: geometry.size.height)
+                .padding(.horizontal, 24)
+                .padding(.vertical, 12)
             }
         }
     }
-
-    private func setupColumns(for width: CGFloat) -> [GridItem] {
-        width >= 1100
-            ? [GridItem(.flexible(), spacing: 20), GridItem(.flexible(), spacing: 20)]
-            : [GridItem(.flexible(), spacing: 20)]
-    }
 }
 
-private struct SetupHeroCard: View {
-    @ObservedObject var vm: AppViewModel
+private struct SetupPairingFocusView: View {
+    @Environment(\.colorScheme) private var colorScheme
+
+    let isPaired: Bool
+    let onScanTap: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("iPad 监控工作台")
-                        .font(.system(size: 34, weight: .bold, design: .rounded))
-                    Text("完成配对后，监控页可以为任意传感器绘制历史曲线，并将其他硬件信息按温度、功耗、风扇和频率分区展示。")
-                        .font(.title3)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+        VStack(spacing: 28) {
+            Text("欢迎使用PreConnect")
+                .font(.system(size: 44, weight: .bold, design: .rounded))
+                .foregroundStyle(adaptiveTextColor)
 
-                Spacer(minLength: 24)
+            Text("请使用主机端显示的二维码完成配对")
+                .font(.title3)
+                .foregroundStyle(adaptiveTextColor)
 
-                VStack(alignment: .trailing, spacing: 8) {
-                    Label(vm.isPaired ? "在线监控中" : "等待配对", systemImage: vm.isPaired ? "checkmark.seal.fill" : "bolt.badge.clock")
-                        .font(.headline)
-                        .foregroundStyle(vm.isPaired ? .green : .orange)
-                    if let updatedAt = vm.lastUpdatedAt {
-                        Text("最近更新 \(updatedAt.formatted(date: .omitted, time: .standard))")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
-                }
-            }
+            Image(systemName: "qrcode.viewfinder")
+                .font(.system(size: 92, weight: .semibold))
+                .foregroundStyle(Color.blue)
+                .frame(width: 220, height: 220)
 
-            HStack(spacing: 14) {
-                SetupStatPill(title: "图表监控", value: "任意传感器", tint: .blue)
-                SetupStatPill(title: "可控区块", value: "8 项", tint: .orange)
-                SetupStatPill(title: "轮询频率", value: vm.pollingIntervalText, tint: .green)
-            }
-        }
-        .padding(28)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            LinearGradient(
-                colors: [Color(red: 0.10, green: 0.16, blue: 0.32), Color(red: 0.11, green: 0.43, blue: 0.58)],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            ),
-            in: RoundedRectangle(cornerRadius: 30, style: .continuous)
-        )
-        .overlay(alignment: .topTrailing) {
-            Circle()
-                .fill(.white.opacity(0.12))
-                .frame(width: 180, height: 180)
-                .offset(x: 50, y: -60)
-        }
-        .foregroundStyle(.white)
-    }
-}
-
-private struct SetupStatPill: View {
-    let title: String
-    let value: String
-    let tint: Color
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(title)
-                .font(.caption)
-                .foregroundStyle(.white.opacity(0.8))
-            Text(value)
-                .font(.headline.weight(.semibold))
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
-        .background(tint.opacity(0.22), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-    }
-}
-
-private struct ConnectionCard: View {
-    @ObservedObject var vm: AppViewModel
-
-    var body: some View {
-        DashboardSurfaceCard {
-            VStack(alignment: .leading, spacing: 16) {
-                SectionHeader(title: "服务连接", subtitle: "先验证 API 端点，再进行配对", symbolName: "network")
-
-                TextField("服务根地址，例如 http://192.168.1.12:5005/", text: $vm.baseURLText)
-                    .textInputAutocapitalization(.never)
-                    .autocorrectionDisabled(true)
-                    .keyboardType(.URL)
-                    .font(.body.monospaced())
-                    .padding(14)
-                    .background(Color.white.opacity(0.88), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-
+            Button(action: onScanTap) {
                 HStack(spacing: 12) {
-                    Button {
-                        Task { await vm.pingAndLoadStatus() }
-                    } label: {
-                        Label("验证服务", systemImage: "bolt.horizontal.circle")
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.large)
-                    .disabled(vm.isLoading)
-
-                    if let endpoint = vm.status?.endpoint {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(vm.status?.machineName ?? URL(string: endpoint)?.host ?? "主机")
-                                .font(.headline)
-                            Text(endpoint)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .lineLimit(2)
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    }
+                    Text(isPaired ? "扫码配对" : "扫码配对")
                 }
+                .font(.title3.weight(.bold))
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 20)
             }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .tint(Color.blue)
+            
+
         }
+        .frame(maxWidth: 760)
+        .padding(.horizontal, 40)
+        .padding(.vertical, 44)
     }
-}
 
-private struct PairingCard: View {
-    @ObservedObject var vm: AppViewModel
-    @Binding var showScanner: Bool
-
-    var body: some View {
-        DashboardSurfaceCard {
-            VStack(alignment: .leading, spacing: 16) {
-                SectionHeader(title: "设备配对", subtitle: "扫码优先，手动 PIN 作为兜底", symbolName: "qrcode.viewfinder")
-
-                Button {
-                    vm.startQRScanning()
-                    showScanner = true
-                } label: {
-                    HStack {
-                        Image(systemName: "qrcode.viewfinder")
-                        Text(vm.isPaired ? "重新扫码配对" : "扫码配对")
-                        Spacer()
-                        Image(systemName: "arrow.up.right.and.arrow.down.left.rectangle")
-                    }
-                    .font(.headline)
-                    .padding(.vertical, 6)
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
-
-                HStack(spacing: 10) {
-                    Capsule().fill(.quaternary).frame(height: 1)
-                    Text("或输入主机上的 6 位 PIN")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                    Capsule().fill(.quaternary).frame(height: 1)
-                }
-
-                TextField("6 位 PIN", text: $vm.pin)
-                    .keyboardType(.numberPad)
-                    .font(.system(size: 30, weight: .semibold, design: .monospaced))
-                    .multilineTextAlignment(.center)
-                    .padding(14)
-                    .background(Color.white.opacity(0.88), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-                    .onChange(of: vm.pin) { _, newValue in
-                        vm.pin = String(newValue.filter(\.isNumber).prefix(6))
-                    }
-
-                HStack(spacing: 12) {
-                    Button {
-                        Task { await vm.pair() }
-                    } label: {
-                        Label("开始配对", systemImage: "key.fill")
-                            .frame(maxWidth: .infinity)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(vm.pin.count != 6 || vm.isLoading)
-
-                    if let session = vm.session {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("已连接到 \(session.serverName)")
-                                .font(.headline)
-                            if let expire = session.expiresAt {
-                                Text("会话到期 \(expire.formatted(date: .omitted, time: .shortened))")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                }
-            }
-        }
-    }
-}
-
-private struct SetupStatusCard: View {
-    @ObservedObject var vm: AppViewModel
-
-    var body: some View {
-        DashboardSurfaceCard {
-            VStack(alignment: .leading, spacing: 16) {
-                SectionHeader(title: "当前会话", subtitle: "监控页会在配对成功后自动激活", symbolName: "waveform.path.ecg.rectangle")
-
-                if let session = vm.session {
-                    VStack(alignment: .leading, spacing: 14) {
-                        StatusFactRow(title: "主机", value: session.serverName, symbolName: "desktopcomputer")
-                        StatusFactRow(title: "客户端设备", value: session.deviceName, symbolName: "ipad.and.iphone")
-                        StatusFactRow(title: "端点", value: session.endpoint.absoluteString, symbolName: "network")
-                        if let expiresAt = session.expiresAt {
-                            StatusFactRow(
-                                title: "会话有效期",
-                                value: expiresAt.formatted(date: .numeric, time: .shortened),
-                                symbolName: "clock.badge.checkmark"
-                            )
-                        }
-                    }
-                } else {
-                    Text("当前还没有活跃会话。完成二维码或 PIN 配对后，监控面板会显示实时图表和硬件详情。")
-                        .font(.body)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-        }
+    private var adaptiveTextColor: Color {
+        colorScheme == .dark ? .white : .black
     }
 }
 
@@ -575,9 +398,6 @@ private struct DashboardCanvasView: View {
             let cellHeight = max(rawCellHeight, 20)
 
             ZStack(alignment: .topLeading) {
-                RoundedRectangle(cornerRadius: 22, style: .continuous)
-                    .fill(Color.white.opacity(0.52))
-
                 ForEach(layoutResult.placements) { placement in
                     if let widget = widgetStates.first(where: { $0.id == placement.widgetID }) {
                         DashboardWidgetTile(widget: widget)
@@ -591,19 +411,6 @@ private struct DashboardCanvasView: View {
                             )
                     }
                 }
-
-                VStack {
-                    HStack {
-                        Spacer()
-                        Text("布局：\(layoutResult.scaleTier.title) · \(occupiedRowCount) 行")
-                            .font(.caption.weight(.semibold))
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 6)
-                            .background(Color.white.opacity(0.9), in: Capsule())
-                    }
-                    Spacer()
-                }
-                .padding(10)
 
                 if rawCellWidth < 20 || rawCellHeight < 20 {
                     VStack(spacing: 8) {
@@ -619,11 +426,6 @@ private struct DashboardCanvasView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 24, style: .continuous))
-        .overlay {
-            RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .stroke(Color.white.opacity(0.45), lineWidth: 1)
-        }
     }
 }
 
@@ -672,26 +474,11 @@ private struct DashboardWidgetTile: View {
         }
         .padding(tilePadding)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-        .background(
-            ZStack {
-                RoundedRectangle(cornerRadius: 22, style: .continuous)
-                    .fill(Color.white.opacity(0.88))
-
-                RoundedRectangle(cornerRadius: 22, style: .continuous)
-                    .fill(
-                        LinearGradient(
-                            colors: [widget.sensor.softTint, Color.white.opacity(0.02)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-            }
-        )
+        .background(Color.white.opacity(0.88), in: RoundedRectangle(cornerRadius: 22, style: .continuous))
         .overlay {
             RoundedRectangle(cornerRadius: 22, style: .continuous)
                 .stroke(widget.sensor.lineTint, lineWidth: 1)
         }
-        .shadow(color: Color.black.opacity(0.05), radius: 12, x: 0, y: 8)
     }
 
     private var widgetIcon: String {
@@ -742,13 +529,7 @@ private struct SensorWidgetChart: View {
             } else {
                 Chart(samples) { sample in
                     AreaMark(x: .value("时间", sample.timestamp), y: .value("数值", sample.value))
-                        .foregroundStyle(
-                            LinearGradient(
-                                colors: [sensor.strongColor.opacity(0.26), sensor.strongColor.opacity(0.04)],
-                                startPoint: .top,
-                                endPoint: .bottom
-                            )
-                        )
+                        .foregroundStyle(sensor.strongColor.opacity(0.16))
                     LineMark(x: .value("时间", sample.timestamp), y: .value("数值", sample.value))
                         .interpolationMethod(.catmullRom)
                         .lineStyle(.init(lineWidth: 3, lineCap: .round))
@@ -763,6 +544,7 @@ private struct SensorWidgetChart: View {
                             .foregroundStyle(sensor.strongColor.opacity(0.16))
                     }
                 }
+                .chartYScale(domain: yAxisDomain)
                 .chartXAxis(.hidden)
                 .chartYAxis {
                     AxisMarks(position: .leading) { _ in
@@ -782,6 +564,14 @@ private struct SensorWidgetChart: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    private var yAxisDomain: ClosedRange<Double> {
+        let values = samples.map(\.value)
+        guard let maxValue = values.max() else {
+            return 0...100
+        }
+        return 0...(maxValue + 40)
     }
 }
 
@@ -926,6 +716,7 @@ private struct SensorChartCard: View {
                         .lineStyle(.init(lineWidth: 3, lineCap: .round))
                         .foregroundStyle(chart.accentColor)
                     }
+                    .chartYScale(domain: yAxisDomain)
                     .chartXAxis(.hidden)
                     .chartYAxis {
                         AxisMarks(position: .leading) { _ in
@@ -938,6 +729,14 @@ private struct SensorChartCard: View {
                 }
             }
         }
+    }
+
+    private var yAxisDomain: ClosedRange<Double> {
+        let values = chart.samples.map(\.value)
+        guard let maxValue = values.max() else {
+            return 0...100
+        }
+        return 0...(maxValue + 40)
     }
 }
 
@@ -1125,17 +924,12 @@ private struct SettingsView: View {
     @State private var warningMessage: String?
     @State private var frozenSensorGroups: [(category: SensorCategory, sensors: [SensorDisplayItem])] = []
     @State private var frozenSession: SessionInfo?
-
-    private var widgetConfigurations: [DashboardWidgetConfig] {
-        WidgetConfigurationStore.decode(widgetConfigurationsRaw)
-    }
-
-    private var layoutResult: DashboardLayoutResult {
-        DashboardLayoutEngine.layout(for: widgetConfigurations)
-    }
+    @State private var widgetConfigurationsState: [DashboardWidgetConfig] = []
+    @State private var layoutResultState = DashboardLayoutEngine.layout(for: [])
+    @State private var selectableModesState: [String: Set<DashboardWidgetDisplayMode>] = [:]
 
     private var usedGridCells: Int {
-        layoutResult.placements.reduce(0) { partial, placement in
+        layoutResultState.placements.reduce(0) { partial, placement in
             partial + placement.span.columns * placement.span.rows
         }
     }
@@ -1163,7 +957,7 @@ private struct SettingsView: View {
                     .padding(.horizontal, 28)
                     .padding(.vertical, 24)
                 } else {
-                    VStack(alignment: .leading, spacing: 24) {
+                    LazyVStack(alignment: .leading, spacing: 24) {
                         sensorConfigurationPanel
                         dashboardStatusPanel
                         pollingPanel
@@ -1186,15 +980,26 @@ private struct SettingsView: View {
             frozenSession = vm.session
 
             vm.updatePollingInterval(pollingInterval)
-            if widgetConfigurations.isEmpty {
+            let restored = WidgetConfigurationStore.decode(widgetConfigurationsRaw)
+            if restored.isEmpty {
                 let defaults = vm.defaultWidgetConfigs()
                 if !defaults.isEmpty {
-                    widgetConfigurationsRaw = WidgetConfigurationStore.encode(defaults)
+                    updateConfigurations(defaults, persistRaw: true)
+                } else {
+                    updateConfigurations([], persistRaw: false)
                 }
+            } else {
+                updateConfigurations(restored, persistRaw: false)
             }
         }
         .onChange(of: pollingInterval) { _, newValue in
             vm.updatePollingInterval(newValue)
+        }
+        .onChange(of: widgetConfigurationsRaw) { _, newValue in
+            let restored = WidgetConfigurationStore.decode(newValue)
+            if restored != widgetConfigurationsState {
+                updateConfigurations(restored, persistRaw: false)
+            }
         }
     }
 
@@ -1207,15 +1012,17 @@ private struct SettingsView: View {
                     Text("等待遥测数据后才能配置仪表盘组件。")
                         .foregroundStyle(.secondary)
                 } else {
-                    ForEach(frozenSensorGroups, id: \.category.id) { group in
-                        SensorCategorySection(
-                            title: group.category.title,
-                            sensors: group.sensors,
-                            selectedMode: selectedMode,
-                            canSelectMode: canSelect,
-                            onSelect: setMode,
-                            onRemove: removeWidget
-                        )
+                    LazyVStack(alignment: .leading, spacing: 16) {
+                        ForEach(frozenSensorGroups, id: \.category.id) { group in
+                            SensorCategorySection(
+                                title: group.category.title,
+                                sensors: group.sensors,
+                                selectedMode: selectedMode,
+                                canSelectMode: canSelect,
+                                onSelect: setMode,
+                                onRemove: removeWidget
+                            )
+                        }
                     }
                 }
             }
@@ -1235,13 +1042,13 @@ private struct SettingsView: View {
         DashboardSurfaceCard {
             VStack(alignment: .leading, spacing: 16) {
                 SectionHeader(title: "监控展示设置", subtitle: "当前仪表盘容量和布局状态", symbolName: "slider.horizontal.3")
-                StatusFactRow(title: "当前组件数", value: "\(widgetConfigurations.count)", symbolName: "square.grid.3x2")
-                StatusFactRow(title: "布局状态", value: layoutResult.canFitAll ? "可完整显示" : "容量不足", symbolName: "aspectratio.fill")
-                StatusFactRow(title: "自动缩放", value: layoutResult.scaleTier.title, symbolName: "arrow.up.left.and.arrow.down.right")
+                StatusFactRow(title: "当前组件数", value: "\(widgetConfigurationsState.count)", symbolName: "square.grid.3x2")
+                StatusFactRow(title: "布局状态", value: layoutResultState.canFitAll ? "可完整显示" : "容量不足", symbolName: "aspectratio.fill")
+                StatusFactRow(title: "自动缩放", value: layoutResultState.scaleTier.title, symbolName: "arrow.up.left.and.arrow.down.right")
 
                 VStack(alignment: .leading, spacing: 8) {
                     ProgressView(value: Double(usedGridCells), total: Double(totalGridCells))
-                        .tint(layoutResult.canFitAll ? .blue : .orange)
+                        .tint(layoutResultState.canFitAll ? .blue : .orange)
                     Text("画布占用 \(usedGridCells) / \(totalGridCells) 单元")
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -1288,14 +1095,15 @@ private struct SettingsView: View {
     }
 
     private func selectedMode(for sensorID: String) -> DashboardWidgetDisplayMode? {
-        widgetConfigurations.first(where: { $0.sensorId == sensorID })?.displayMode
+        widgetConfigurationsState.first(where: { $0.sensorId == sensorID })?.displayMode
     }
 
     private func setMode(_ mode: DashboardWidgetDisplayMode, for sensor: SensorDisplayItem) {
         guard sensor.supportedDisplayModes.contains(mode) else { return }
 
-        var next = widgetConfigurations
+        var next = widgetConfigurationsState
         if let index = next.firstIndex(where: { $0.sensorId == sensor.id }) {
+            if next[index].displayMode == mode { return }
             next[index].displayMode = mode
         } else {
             next.append(DashboardWidgetConfig(sensorId: sensor.id, displayMode: mode))
@@ -1306,25 +1114,58 @@ private struct SettingsView: View {
             return
         }
 
-        widgetConfigurationsRaw = WidgetConfigurationStore.encode(next)
+        updateConfigurations(next, persistRaw: true)
     }
 
     private func removeWidget(for sensorID: String) {
-        let next = widgetConfigurations.filter { $0.sensorId != sensorID }
-        widgetConfigurationsRaw = WidgetConfigurationStore.encode(next)
+        let next = widgetConfigurationsState.filter { $0.sensorId != sensorID }
+        updateConfigurations(next, persistRaw: true)
     }
 
     private func canSelect(_ mode: DashboardWidgetDisplayMode, for sensor: SensorDisplayItem) -> Bool {
         guard sensor.supportedDisplayModes.contains(mode) else { return false }
 
-        var next = widgetConfigurations
-        if let index = next.firstIndex(where: { $0.sensorId == sensor.id }) {
-            next[index].displayMode = mode
-        } else {
-            next.append(DashboardWidgetConfig(sensorId: sensor.id, displayMode: mode))
+        if selectedMode(for: sensor.id) == mode {
+            return true
         }
 
-        return vm.canFitWidgets(next)
+        return selectableModesState[sensor.id]?.contains(mode) ?? false
+    }
+
+    private func updateConfigurations(_ next: [DashboardWidgetConfig], persistRaw: Bool) {
+        widgetConfigurationsState = next
+        layoutResultState = DashboardLayoutEngine.layout(for: next)
+        selectableModesState = buildSelectableModes(configurations: next)
+
+        guard persistRaw else { return }
+        let encoded = WidgetConfigurationStore.encode(next)
+        if encoded != widgetConfigurationsRaw {
+            widgetConfigurationsRaw = encoded
+        }
+    }
+
+    private func buildSelectableModes(configurations: [DashboardWidgetConfig]) -> [String: Set<DashboardWidgetDisplayMode>] {
+        let sensors = frozenSensorGroups.flatMap(\.sensors)
+        var result: [String: Set<DashboardWidgetDisplayMode>] = [:]
+
+        for sensor in sensors {
+            var selectable: Set<DashboardWidgetDisplayMode> = []
+            for mode in sensor.supportedDisplayModes {
+                var candidate = configurations
+                if let index = candidate.firstIndex(where: { $0.sensorId == sensor.id }) {
+                    candidate[index].displayMode = mode
+                } else {
+                    candidate.append(DashboardWidgetConfig(sensorId: sensor.id, displayMode: mode))
+                }
+
+                if vm.canFitWidgets(candidate) {
+                    selectable.insert(mode)
+                }
+            }
+            result[sensor.id] = selectable
+        }
+
+        return result
     }
 }
 
@@ -1343,7 +1184,7 @@ private struct SensorCategorySection: View {
             Text(title)
                 .font(.title3.bold())
 
-            VStack(spacing: 14) {
+            LazyVStack(spacing: 14) {
                 ForEach(Array(sensorRows.enumerated()), id: \.offset) { _, rowSensors in
                     HStack(alignment: .top, spacing: 14) {
                         ForEach(rowSensors) { sensor in
@@ -1385,6 +1226,8 @@ private struct SensorCategorySection: View {
 }
 
 private struct PollingIntervalPicker: View {
+    @Environment(\.colorScheme) private var colorScheme
+
     @Binding var selectedInterval: TimeInterval
 
     private let options: [TimeInterval] = [0.5, 1, 2, 3, 5, 10]
@@ -1419,13 +1262,17 @@ private struct PollingIntervalPicker: View {
         }
         .buttonStyle(.plain)
         .background(
-            (isSelected ? Color.blue.opacity(0.14) : Color.white.opacity(0.80)),
+            (isSelected ? Color.blue.opacity(0.20) : neutralOptionBackground),
             in: RoundedRectangle(cornerRadius: 16, style: .continuous)
         )
         .overlay {
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .stroke(isSelected ? Color.blue.opacity(0.55) : Color.clear, lineWidth: 1.5)
         }
+    }
+
+    private var neutralOptionBackground: Color {
+        colorScheme == .dark ? Color.white.opacity(0.10) : Color.black.opacity(0.04)
     }
 
     private func label(for value: TimeInterval) -> String {
@@ -1437,6 +1284,8 @@ private struct PollingIntervalPicker: View {
 }
 
 private struct SensorConfiguratorCard: View {
+    @Environment(\.colorScheme) private var colorScheme
+
     let sensor: SensorDisplayItem
     let selectedMode: DashboardWidgetDisplayMode?
     let canSelectMode: (DashboardWidgetDisplayMode) -> Bool
@@ -1507,7 +1356,10 @@ private struct SensorConfiguratorCard: View {
     }
 
     private var backgroundColor: Color {
-        selectedMode != nil ? Color.blue.opacity(0.08) : Color.white.opacity(0.80)
+        if selectedMode != nil {
+            return Color.blue.opacity(colorScheme == .dark ? 0.22 : 0.10)
+        }
+        return colorScheme == .dark ? Color.white.opacity(0.10) : Color.black.opacity(0.04)
     }
 
     private func modeButton(for mode: DashboardWidgetDisplayMode) -> some View {
@@ -1524,7 +1376,7 @@ private struct SensorConfiguratorCard: View {
         }
         .buttonStyle(.plain)
         .background(
-            (isSelected ? Color.blue.opacity(0.14) : Color.white.opacity(0.75)),
+            (isSelected ? Color.blue.opacity(0.20) : neutralModeBackground),
             in: RoundedRectangle(cornerRadius: 14, style: .continuous)
         )
         .overlay {
@@ -1533,6 +1385,10 @@ private struct SensorConfiguratorCard: View {
         }
         .opacity(canSelect || isSelected ? 1 : 0.45)
         .disabled(!canSelect && !isSelected)
+    }
+
+    private var neutralModeBackground: Color {
+        colorScheme == .dark ? Color.white.opacity(0.10) : Color.black.opacity(0.04)
     }
 }
 
@@ -1616,25 +1472,11 @@ private struct DashboardSurfaceCard<Content: View>: View {
 }
 
 private struct AppBackground: View {
+    @Environment(\.colorScheme) private var colorScheme
+
     var body: some View {
-        ZStack {
-            LinearGradient(
-                colors: [Color(red: 0.95, green: 0.97, blue: 1.00), Color(red: 0.90, green: 0.94, blue: 0.98)],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
+        (colorScheme == .dark ? Color.black : Color.white)
             .ignoresSafeArea()
-
-            Circle()
-                .fill(Color(red: 0.11, green: 0.43, blue: 0.58).opacity(0.08))
-                .frame(width: 500, height: 500)
-                .offset(x: 340, y: -280)
-
-            Circle()
-                .fill(Color(red: 0.97, green: 0.53, blue: 0.19).opacity(0.08))
-                .frame(width: 420, height: 420)
-                .offset(x: -320, y: 340)
-        }
     }
 }
 
@@ -1647,6 +1489,8 @@ struct QRScanSheet: View {
     var body: some View {
         NavigationStack {
             phaseContent
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(AppBackground())
                 .navigationTitle("扫码配对")
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
