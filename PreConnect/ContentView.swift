@@ -1,3 +1,4 @@
+// MARK: - 引入和宏定义
 import SwiftUI
 import Charts
 import Combine
@@ -34,6 +35,8 @@ private enum WidgetConfigurationStore {
 private enum PerformanceNotice {
     static let pollingPausedOutsideDashboard = "为优化性能，监控面板外已暂停数据刷新"
 }
+
+// MARK: - 根视图容器
 
 struct ContentView: View {
     @Environment(\.colorScheme) private var colorScheme
@@ -196,6 +199,8 @@ struct ContentView: View {
     }
 }
 
+// MARK: - 侧边栏
+
 private struct SidebarView: View {
     @Binding var selectedSection: AppSection?
     @ObservedObject var vm: AppViewModel
@@ -243,6 +248,8 @@ private struct SidebarView: View {
         .navigationTitle("PreConnect")
     }
 }
+
+// MARK: - 连接与配对页面
 
 private struct SetupWorkspaceView: View {
     @ObservedObject var vm: AppViewModel
@@ -317,6 +324,8 @@ private struct SetupPairingFocusView: View {
     }
 }
 
+// MARK: - 监控面板页面
+
 private struct DashboardView: View {
     @ObservedObject var vm: AppViewModel
     let onUserInteraction: () -> Void
@@ -376,6 +385,8 @@ private struct DashboardView: View {
         widgetConfigurationsRaw = WidgetConfigurationStore.encode(defaults)
     }
 }
+
+// MARK: - 监控小组件
 
 private struct DashboardCanvasView: View {
     let layoutResult: DashboardLayoutResult
@@ -632,6 +643,8 @@ private struct ProgressWidgetContent: View {
         return Swift.min(Swift.max(value / 100.0, 0), 1)
     }
 }
+
+// MARK: - 监控辅助卡片
 
 private struct DashboardCapacityWarningView: View {
     var body: some View {
@@ -917,6 +930,8 @@ private struct DashboardEmptyCustomizationView: View {
     }
 }
 
+// MARK: - 设置页面
+
 private struct SettingsView: View {
     let vm: AppViewModel
     @AppStorage(DashboardPreferenceKey.widgetConfigurations) private var widgetConfigurationsRaw = "[]"
@@ -1168,6 +1183,8 @@ private struct SettingsView: View {
         return result
     }
 }
+
+// MARK: - 通用组件
 
 private struct SensorCategorySection: View {
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
@@ -1480,7 +1497,7 @@ private struct AppBackground: View {
     }
 }
 
-// MARK: - QR Scan Sheet
+// MARK: - 扫码弹窗
 
 struct QRScanSheet: View {
     @ObservedObject var vm: AppViewModel
@@ -1636,7 +1653,7 @@ struct QRScanSheet: View {
     }
 }
 
-// MARK: - Expiry Countdown
+// MARK: - 倒计时视图
 
 struct ExpiryCountdown: View {
     let expires: Date
