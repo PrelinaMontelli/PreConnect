@@ -49,6 +49,7 @@ struct ContentView: View {
     @Environment(\.colorScheme) private var colorScheme
     @StateObject private var vm = AppViewModel()
     @State private var showScanner = false
+    @State private var showGlobalHelpDialog = false
     @State private var selectedSection: AppSection? = .setup
     @State private var isDashboardTopBarVisible = false
     @State private var dashboardTopBarHideTask: Task<Void, Never>?
@@ -84,54 +85,72 @@ struct ContentView: View {
     // MARK: - 主体视图
 
     var body: some View {
-        NavigationSplitView {
-            SidebarView(selectedSection: $selectedSection, vm: vm)
-        } detail: {
-            ZStack {
-                AppBackground()
-                detailContent
-            }
-            .overlay(alignment: .top) {
-                if shouldShowPollingPausedNotice {
-                    Text(PerformanceNotice.pollingPausedOutsideDashboard)
-                        .font(.caption2.weight(.medium))
-                        .foregroundStyle(colorScheme == .dark ? Color.white : Color.black)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 7)
-                        .background(.ultraThinMaterial, in: Capsule())
-                        .overlay {
-                            Capsule()
-                                .stroke(Color.white.opacity(0.55), lineWidth: 1)
-                        }
-                        .padding(.top, 8)
+        ZStack {
+            NavigationSplitView {
+                SidebarView(selectedSection: $selectedSection, vm: vm)
+            } detail: {
+                ZStack {
+                    AppBackground()
+                    detailContent
                 }
-            }
-            .toolbar {
-                if isDashboardActive && isDashboardTopBarVisible {
-                    ToolbarItemGroup(placement: .topBarTrailing) {
-                        if vm.isLoading {
-                            ProgressView()
-                        }
+                .overlay(alignment: .top) {
+                    if shouldShowPollingPausedNotice {
+                        Text(PerformanceNotice.pollingPausedOutsideDashboard)
+                            .font(.caption2.weight(.medium))
+                            .foregroundStyle(colorScheme == .dark ? Color.white : Color.black)
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 7)
+                            .background(.ultraThinMaterial, in: Capsule())
+                            .overlay {
+                                Capsule()
+                                    .stroke(Color.white.opacity(0.55), lineWidth: 1)
+                            }
+                            .padding(.top, 8)
+                    }
+                }
+                .toolbar {
+                    if isDashboardActive && isDashboardTopBarVisible {
+                        ToolbarItemGroup(placement: .topBarTrailing) {
+                            if vm.isLoading {
+                                ProgressView()
+                            }
 
-                        Button {
-                            Task { await vm.refreshTelemetryOnce(showLoadingIndicator: true) }
-                        } label: {
-                            Label("刷新", systemImage: "arrow.clockwise")
+                            Button {
+                                Task { await vm.refreshTelemetryOnce(showLoadingIndicator: true) }
+                            } label: {
+                                Label("刷新", systemImage: "arrow.clockwise")
+                            }
                         }
                     }
                 }
+                .toolbar(isDashboardActive && !isDashboardTopBarVisible ? .hidden : .visible, for: .navigationBar)
             }
-            .toolbar(isDashboardActive && !isDashboardTopBarVisible ? .hidden : .visible, for: .navigationBar)
+            .navigationSplitViewStyle(.balanced)
+            .alert("错误", isPresented: showError) {
+                Button("确定") { vm.errorMessage = nil }
+            } message: {
+                Text(vm.errorMessage ?? "")
+            }
+            .sheet(isPresented: $showScanner, onDismiss: { vm.cancelQRScan() }) {
+                QRScanSheet(vm: vm)
+            }
+
+            if showGlobalHelpDialog {
+                Color.black.opacity(0.38)
+                    .ignoresSafeArea()
+                    .transition(.opacity)
+
+                AboutSupportDialog {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        showGlobalHelpDialog = false
+                    }
+                }
+                .padding(.horizontal, 20)
+                .transition(.scale(scale: 0.95).combined(with: .opacity))
+                .zIndex(1)
+            }
         }
-        .navigationSplitViewStyle(.balanced)
-        .alert("错误", isPresented: showError) {
-            Button("确定") { vm.errorMessage = nil }
-        } message: {
-            Text(vm.errorMessage ?? "")
-        }
-        .sheet(isPresented: $showScanner, onDismiss: { vm.cancelQRScan() }) {
-            QRScanSheet(vm: vm)
-        }
+        .animation(.easeInOut(duration: 0.2), value: showGlobalHelpDialog)
         .onAppear {
             vm.updatePollingInterval(pollingInterval)
             if vm.isPaired {
@@ -182,7 +201,11 @@ struct ContentView: View {
         case .settings:
             SettingsView(vm: vm)
         case .about:
-            AboutView()
+            AboutView {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    showGlobalHelpDialog = true
+                }
+            }
         }
     }
 
@@ -231,7 +254,7 @@ private struct SidebarView: View {
                     .tag(AppSection.dashboard)
                 Label("显示设置", systemImage: "slider.horizontal.3")
                     .tag(AppSection.settings)
-                Label("关于 PreConnect", systemImage: "info.circle")
+                Label("关于", systemImage: "info.circle")
                     .tag(AppSection.about)
             }
 
