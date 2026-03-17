@@ -1,6 +1,14 @@
+//
+//  QRPayload.swift
+//  PreConnect 的二维码载荷解析
+//  Created by Prelina Montelli
+//
+
 import Foundation
 
 /// Decoded + validated payload from a preconnect/pair QR code.
+// MARK: - 二维码载荷
+
 struct QRPayload {
     let type: String
     let endpointURL: URL        // e.g. http://host:5005/api/pair
@@ -9,7 +17,7 @@ struct QRPayload {
     let expires: Date
     let server: String?         // optional display name
 
-    // MARK: - Derived
+    // MARK: - 派生属性
 
     /// Service root URL derived from the pair endpoint (strips /api/pair → /)
     var serviceBaseURL: URL {
@@ -21,7 +29,7 @@ struct QRPayload {
 
     var secondsUntilExpiry: TimeInterval { expires.timeIntervalSinceNow }
 
-    // MARK: - Parse & validate
+    // MARK: - 二维码错误
 
     enum QRError: LocalizedError {
         case invalidJSON
@@ -40,6 +48,8 @@ struct QRPayload {
             }
         }
     }
+
+    // MARK: - 解析与校验
 
     /// Parse a raw QR string. Throws `QRError` on validation failure.
     /// - Parameter clockSkewTolerance: Extra seconds tolerated when checking expiry (default 120 s).

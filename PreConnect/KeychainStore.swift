@@ -1,10 +1,18 @@
+//
+//  KeychainStore.swift
+//  PreConnect 的钥匙串存储
+//  Created by Prelina Montelli
+//
+
 import Foundation
 import Security
 
-// MARK: - Raw Keychain CRUD
+// MARK: - 钥匙串存储
 
 struct KeychainStore {
     private static let service = "com.preconnect.session"
+
+    // MARK: - 原始读写
 
     static func save(_ data: Data, forKey key: String) {
         var q = base(key)
@@ -32,7 +40,7 @@ struct KeychainStore {
     }
 }
 
-// MARK: - Persisted Session
+// MARK: - 持久化会话
 
 /// Codable representation of a paired session stored in Keychain.
 /// The `token` field is never printed or logged.
@@ -46,7 +54,7 @@ struct PersistedSession: Codable {
 
     private static let key = "active_session"
 
-    // MARK: Lifecycle
+    // MARK: - 会话持久化
 
     func persist() {
         guard let data = try? JSONEncoder().encode(self) else { return }
@@ -62,7 +70,7 @@ struct PersistedSession: Codable {
         KeychainStore.delete(forKey: key)
     }
 
-    // MARK: Conversion
+    // MARK: - 会话转换
 
     func toSessionInfo() -> SessionInfo? {
         guard let url = URL(string: endpointString) else { return nil }

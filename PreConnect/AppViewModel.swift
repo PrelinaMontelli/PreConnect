@@ -1,8 +1,14 @@
+//
+//  AppViewModel.swift
+//  PreConnect 的应用状态与业务逻辑
+//  Created by Prelina Montelli
+//
+
 import Foundation
 import UIKit
 import Combine
 
-// MARK: - QR Scan Phase
+// MARK: - 二维码扫描状态
 
 enum QRScanPhase {
     case idle
@@ -12,11 +18,13 @@ enum QRScanPhase {
     case failed(String)
 }
 
-// MARK: - AppViewModel
+// MARK: - 视图模型
 
 @MainActor
 final class AppViewModel: ObservableObject {
     static let defaultPollingInterval: TimeInterval = 2
+
+    // MARK: - 发布状态
 
     @Published var baseURLText: String = "http://127.0.0.1:5005/"
     @Published var pin: String = ""
@@ -34,6 +42,8 @@ final class AppViewModel: ObservableObject {
     @Published private(set) var chartableSensorsCache: [SensorDisplayItem] = []
     @Published private(set) var sensorsByCategoryCache: [(category: SensorCategory, sensors: [SensorDisplayItem])] = []
 
+    // MARK: - 私有状态
+
     private let client = APIClient()
     private var pollTask: Task<Void, Never>?
     private var telemetryPollingEnabled = true
@@ -47,6 +57,8 @@ final class AppViewModel: ObservableObject {
         let history: [String: [MetricSample]]
         let updatedAt: Date
     }
+
+    // MARK: - 计算属性
 
     var isPaired: Bool { session != nil }
 
@@ -131,7 +143,7 @@ final class AppViewModel: ObservableObject {
         return String(format: "%.0f 秒", pollingInterval)
     }
 
-    // MARK: - Init (restore persisted session)
+    // MARK: - 初始化
 
     init() {
         if let persisted = PersistedSession.restore(),
@@ -150,7 +162,7 @@ final class AppViewModel: ObservableObject {
         }
     }
 
-    // MARK: - Manual Connection
+    // MARK: - 手动连接
 
     func pingAndLoadStatus() async {
         do {
@@ -205,7 +217,7 @@ final class AppViewModel: ObservableObject {
         isLoading = false
     }
 
-    // MARK: - QR Pairing
+    // MARK: - 二维码配对
 
     func startQRScanning() {
         cameraError = nil
@@ -290,7 +302,7 @@ final class AppViewModel: ObservableObject {
         }
     }
 
-    // MARK: - Telemetry
+    // MARK: - 遥测数据
 
     func refreshTelemetryOnce(showLoadingIndicator: Bool = false) async {
         guard let session else { return }
@@ -337,6 +349,8 @@ final class AppViewModel: ObservableObject {
         }
     }
 
+    // MARK: - 会话控制
+
     private func handleSessionExpired() {
         pollTask?.cancel()
         pollTask = nil
@@ -365,6 +379,8 @@ final class AppViewModel: ObservableObject {
         lastUpdatedAt = nil
         PersistedSession.wipe()
     }
+
+    // MARK: - 仪表盘支持
 
     func setTelemetryPollingEnabled(_ isEnabled: Bool) {
         let shouldEnable = isEnabled && isPaired
@@ -450,6 +466,8 @@ final class AppViewModel: ObservableObject {
             }
     }
 
+    // MARK: - 轮询控制
+
     private func startPolling() {
         telemetryPollingEnabled = true
         pollTask?.cancel()
@@ -462,6 +480,8 @@ final class AppViewModel: ObservableObject {
             }
         }
     }
+
+    // MARK: - 辅助方法
 
     private func normalizedBaseURL() throws -> URL {
         var text = baseURLText.trimmingCharacters(in: .whitespacesAndNewlines)

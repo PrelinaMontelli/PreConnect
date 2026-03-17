@@ -1,13 +1,14 @@
 //
 //  PreConnectUITestsLaunchTests.swift
-//  PreConnectUITests
-//
-//  Created by Prelina  on 2026/2/26.
+//  PreConnect 的启动界面测试
+//  Created by Prelina Montelli
 //
 
 import XCTest
 
 final class PreConnectUITestsLaunchTests: XCTestCase {
+
+    // MARK: - 测试配置
 
     override class var runsForEachTargetApplicationUIConfiguration: Bool {
         true
@@ -16,6 +17,8 @@ final class PreConnectUITestsLaunchTests: XCTestCase {
     override func setUpWithError() throws {
         continueAfterFailure = false
     }
+
+    // MARK: - 启动测试
 
     @MainActor
     func testLaunch() throws {

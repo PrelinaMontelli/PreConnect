@@ -1,5 +1,13 @@
+//
+//  Models.swift
+//  PreConnect 的数据模型
+//  Created by Prelina Montelli
+//
+
 import Foundation
 import SwiftUI
+
+// MARK: - 接口响应模型
 
 struct PingResponse: Decodable {
     let ok: Bool
@@ -89,6 +97,8 @@ struct SensorReading: Decodable, Sendable {
     let index: Int?
 }
 
+// MARK: - 会话与指标模型
+
 struct SessionInfo {
     let token: String
     let expiresAt: Date?
@@ -164,6 +174,8 @@ struct SensorChartState: Identifiable {
         }
     }
 }
+
+// MARK: - 仪表盘模型
 
 enum DashboardWidgetDisplayMode: String, CaseIterable, Codable, Identifiable {
     case chart
@@ -262,6 +274,8 @@ struct DashboardLayoutResult {
     let scaleTier: DashboardScaleTier
 }
 
+// MARK: - 布局引擎
+
 enum DashboardLayoutEngine {
     static let gridColumns = 13
     static let gridRows = 7
@@ -349,6 +363,8 @@ enum DashboardLayoutEngine {
     }
 }
 
+// MARK: - 传感器分类
+
 enum SensorCategory: String, CaseIterable, Identifiable, Sendable {
     case temperature
     case power
@@ -417,6 +433,8 @@ struct DashboardFact: Identifiable {
     let value: String
     let symbolName: String
 }
+
+// MARK: - 传感器展示模型
 
 struct SensorDisplayItem: Identifiable, Sendable {
     let id: String

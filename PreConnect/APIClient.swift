@@ -1,4 +1,12 @@
+//
+//  APIClient.swift
+//  PreConnect 的网络请求客户端
+//  Created by Prelina Montelli
+//
+
 import Foundation
+
+// MARK: - 网络错误
 
 enum APIClientError: LocalizedError {
     case invalidBaseURL
@@ -18,12 +26,16 @@ enum APIClientError: LocalizedError {
     }
 }
 
+// MARK: - 网络客户端
+
 struct APIClient {
     private let session: URLSession
 
     init(session: URLSession = .shared) {
         self.session = session
     }
+
+    // MARK: - 公开接口
 
     func ping(baseURL: URL) async throws -> PingResponse {
         try await request(baseURL: baseURL, path: "api/ping", method: "GET", body: Optional<String>.none, token: nil)
@@ -40,6 +52,8 @@ struct APIClient {
     func telemetry(baseURL: URL, token: String) async throws -> TelemetryResponse {
         try await request(baseURL: baseURL, path: "api/telemetry", method: "GET", body: Optional<String>.none, token: token)
     }
+
+    // MARK: - 核心请求方法
 
     private func request<T: Decodable, Body: Encodable>(
         baseURL: URL,
@@ -84,6 +98,8 @@ struct APIClient {
         }
     }
 
+    // MARK: - 二维码配对接口
+
     /// Direct pair to a fully-qualified endpoint URL (used for QR pairing where the endpoint
     /// already includes the path, e.g. http://host:5005/api/pair).
     func pairDirect(endpoint: URL, payload: PairRequest) async throws -> PairResponse {
@@ -111,6 +127,8 @@ struct APIClient {
         }
     }
 
+    // MARK: - 辅助方法
+
     private func parseErrorMessage(from data: Data) -> String? {
         guard
             let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -121,6 +139,8 @@ struct APIClient {
         return message
     }
 }
+
+// MARK: - 解码器配置
 
 extension JSONDecoder {
     static let preconnect: JSONDecoder = {

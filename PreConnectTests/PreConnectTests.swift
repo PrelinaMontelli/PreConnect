@@ -1,12 +1,13 @@
 //
 //  PreConnectTests.swift
-//  PreConnectTests
-//
-//  Created by Prelina  on 2026/2/26.
+//  PreConnect 的单元测试
+//  Created by Prelina Montelli
 //
 
 import Testing
 @testable import PreConnect
+
+// MARK: - 测试用例
 
 struct PreConnectTests {
 

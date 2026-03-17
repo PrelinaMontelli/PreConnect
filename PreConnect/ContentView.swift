@@ -1,4 +1,10 @@
-// MARK: - 引入和宏定义
+//
+//  ContentView.swift
+//  PreConnect 的主界面
+//  Created by Prelina Montelli
+//
+
+// MARK: - 引入与常量
 import SwiftUI
 import Charts
 import Combine
@@ -7,6 +13,7 @@ private enum AppSection: Hashable {
     case setup
     case dashboard
     case settings
+    case about
 }
 
 private enum DashboardPreferenceKey {
@@ -47,6 +54,8 @@ struct ContentView: View {
     @State private var dashboardTopBarHideTask: Task<Void, Never>?
     @AppStorage(DashboardPreferenceKey.pollingInterval) private var pollingInterval = AppViewModel.defaultPollingInterval
 
+    // MARK: - 计算属性
+
     private var showError: Binding<Bool> {
         Binding(
             get: { vm.errorMessage != nil },
@@ -65,12 +74,14 @@ struct ContentView: View {
     }
 
     private var shouldPauseTelemetryPolling: Bool {
-        vm.isPaired && activeSection == .settings
+        vm.isPaired && activeSection != .dashboard
     }
 
     private var shouldShowPollingPausedNotice: Bool {
-        vm.isPaired && activeSection == .settings
+        vm.isPaired && activeSection != .dashboard
     }
+
+    // MARK: - 主体视图
 
     var body: some View {
         NavigationSplitView {
@@ -155,6 +166,8 @@ struct ContentView: View {
         }
     }
 
+    // MARK: - 详情内容
+
     @ViewBuilder
     private var detailContent: some View {
         switch activeSection {
@@ -168,8 +181,12 @@ struct ContentView: View {
             }
         case .settings:
             SettingsView(vm: vm)
+        case .about:
+            AboutView()
         }
     }
+
+    // MARK: - 顶部工具栏控制
 
     private func revealDashboardTopBarTemporarily() {
         guard isDashboardActive else { return }
@@ -214,6 +231,8 @@ private struct SidebarView: View {
                     .tag(AppSection.dashboard)
                 Label("显示设置", systemImage: "slider.horizontal.3")
                     .tag(AppSection.settings)
+                Label("关于 PreConnect", systemImage: "info.circle")
+                    .tag(AppSection.about)
             }
 
             Section("当前状态") {
@@ -875,7 +894,7 @@ private struct DashboardLockedView: View {
             Image(systemName: "lock.rectangle.stack.fill")
                 .font(.system(size: 54))
                 .foregroundStyle(.orange)
-            Text("监控面板尚未解锁")
+            Text("尚未与任何主机配对")
                 .font(.title.bold())
             Text("请先到“连接与配对”完成主机认证，固定仪表盘才会开始拉取并展示硬件数据。")
                 .font(.body)
@@ -898,7 +917,7 @@ private struct DashboardLoadingPlaceholder: View {
             VStack(spacing: 14) {
                 ProgressView()
                     .scaleEffect(1.3)
-                Text("正在等待第一帧遥测数据")
+                Text("正在等待数据")
                     .font(.headline)
                 Text("配对已经完成，应用会继续轮询远端 API。一旦收到数据，图表和信息卡片会自动填充。")
                     .font(.body)
@@ -1539,7 +1558,7 @@ struct QRScanSheet: View {
         }
     }
 
-    // MARK: Scanner
+    // MARK: - 扫码界面
 
     private var scannerView: some View {
         ZStack {
@@ -1571,7 +1590,7 @@ struct QRScanSheet: View {
         }
     }
 
-    // MARK: Pairing in progress
+    // MARK: - 配对中
 
     private func pairingView(payload: QRPayload) -> some View {
         VStack(spacing: 24) {
@@ -1601,7 +1620,7 @@ struct QRScanSheet: View {
         }
     }
 
-    // MARK: Success
+    // MARK: - 成功状态
 
     private var successView: some View {
         VStack(spacing: 20) {
@@ -1622,7 +1641,7 @@ struct QRScanSheet: View {
         .padding()
     }
 
-    // MARK: Failed
+    // MARK: - 失败状态
 
     private func failedView(message: String) -> some View {
         VStack(spacing: 20) {
@@ -1677,4 +1696,73 @@ struct ExpiryCountdown: View {
         return String(format: "%d:%02d", m, s)
     }
 }
+
+// MARK: - 预览
+
+#if DEBUG
+@available(iOS 17.0, *)
+private struct SetupPairingFocusPreviewPlayground: View {
+    @State private var isPaired = false
+    @State private var scanTapCount = 0
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Toggle("模拟已配对", isOn: $isPaired)
+            Text("扫码按钮点击次数：\(scanTapCount)")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            SetupPairingFocusView(
+                isPaired: isPaired,
+                onScanTap: { scanTapCount += 1 }
+            )
+        }
+        .padding(20)
+        .background(AppBackground())
+    }
+}
+
+@available(iOS 17.0, *)
+private struct PollingIntervalPreviewPlayground: View {
+    @State private var pollingInterval: TimeInterval = 1
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("预览专用交互：点击下方频率按钮实时切换")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            PollingIntervalPicker(selectedInterval: $pollingInterval)
+        }
+        .padding(20)
+        .background(AppBackground())
+    }
+}
+
+@available(iOS 17.0, *)
+#Preview("ContentView - Light") {
+    ContentView()
+}
+
+@available(iOS 17.0, *)
+#Preview("ContentView - Dark") {
+    ContentView()
+        .preferredColorScheme(.dark)
+}
+
+@available(iOS 17.0, *)
+#Preview("Setup Pairing - Interactive", traits: .sizeThatFitsLayout) {
+    SetupPairingFocusPreviewPlayground()
+}
+
+@available(iOS 17.0, *)
+#Preview("Polling Interval - Interactive", traits: .sizeThatFitsLayout) {
+    PollingIntervalPreviewPlayground()
+}
+
+@available(iOS 17.0, *)
+#Preview("Expiry Countdown", traits: .sizeThatFitsLayout) {
+    ExpiryCountdown(expires: Date().addingTimeInterval(75))
+        .padding(20)
+}
+#endif
 

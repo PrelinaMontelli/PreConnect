@@ -1,9 +1,11 @@
 //
 //  Item.swift
-//  PreConnect
-//
-//  Created by Prelina  on 2026/2/26.
+//  废弃的占位模型
+//  Created by Prelina Montelli
 //
 
-// Removed: Item — placeholder model no longer needed
 import Foundation
+
+// MARK: - 废弃说明
+
+// 已移除：Item 仅为历史占位模型，当前项目已不再使用。

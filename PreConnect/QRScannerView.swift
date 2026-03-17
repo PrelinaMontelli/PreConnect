@@ -1,13 +1,21 @@
+//
+//  QRScannerView.swift
+//  PreConnect 的二维码扫描视图
+//  Created by Prelina Montelli
+//
+
 import AVFoundation
 import SwiftUI
 import VisionKit
 import Vision
 
-// MARK: - Public UIViewControllerRepresentable
+// MARK: - 扫码视图
 
 struct QRScannerView: UIViewControllerRepresentable {
     let onFound: (String) -> Void
     var onCameraError: ((String) -> Void)?
+
+    // MARK: - 控制器桥接
 
     func makeCoordinator() -> Coordinator { Coordinator(onFound: onFound) }
 
@@ -25,7 +33,7 @@ struct QRScannerView: UIViewControllerRepresentable {
         coordinator.stopScanner()
     }
 
-    // MARK: - Coordinator
+    // MARK: - 协调器
 
     final class Coordinator: NSObject, DataScannerViewControllerDelegate {
         private let onFound: (String) -> Void
@@ -35,6 +43,8 @@ struct QRScannerView: UIViewControllerRepresentable {
         private var onCameraError: ((String) -> Void)?
 
         init(onFound: @escaping (String) -> Void) { self.onFound = onFound }
+
+    // MARK: - 相机生命周期
 
         func startScanner(in hostViewController: UIViewController, onError: @escaping (String) -> Void) {
             self.hostViewController = hostViewController
@@ -92,6 +102,8 @@ struct QRScannerView: UIViewControllerRepresentable {
                 return
             }
         }
+
+        // MARK: - 扫码代理
 
         func stopScanner() {
             scannerViewController?.stopScanning()
