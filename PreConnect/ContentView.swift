@@ -337,10 +337,8 @@ private struct SetupPairingFocusView: View {
                 .font(.title3)
                 .foregroundStyle(adaptiveTextColor)
 
-            Image(systemName: "qrcode.viewfinder")
-                .font(.system(size: 92, weight: .semibold))
-                .foregroundStyle(Color.blue)
-                .frame(width: 220, height: 220)
+            qrCodeIcon
+            
 
             Button(action: onScanTap) {
                 HStack(spacing: 12) {
@@ -363,6 +361,22 @@ private struct SetupPairingFocusView: View {
 
     private var adaptiveTextColor: Color {
         colorScheme == .dark ? .white : .black
+    }
+
+    @ViewBuilder
+    private var qrCodeIcon: some View {
+        if #available(iOS 26.0, *) {
+            Image(systemName: "qrcode.viewfinder")
+                .font(.system(size: 92, weight: .semibold))
+                .foregroundStyle(Color.blue)
+                .frame(width: 220, height: 220)
+                .symbolEffect(.drawOn.individually, options: .nonRepeating)
+        } else {
+            Image(systemName: "qrcode.viewfinder")
+                .font(.system(size: 92, weight: .semibold))
+                .foregroundStyle(Color.blue)
+                .frame(width: 220, height: 220)
+        }
     }
 }
 
