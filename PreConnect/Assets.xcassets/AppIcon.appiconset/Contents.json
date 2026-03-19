@@ -1,7 +1,7 @@
 {
   "images" : [
     {
-      "filename" : "PreConnect-iOS-Default-1024x1024@1x.png",
+      "filename" : "PreConnect-iOS-NoAlpha-Default-1024x1024@1x.png",
       "idiom" : "universal",
       "platform" : "ios",
       "size" : "1024x1024"
@@ -13,7 +13,7 @@
           "value" : "dark"
         }
       ],
-      "filename" : "PreConnect-iOS-Dark-1024x1024@1x.png",
+      "filename" : "PreConnect-iOS-NoAlpha-Dark-1024x1024@1x.png",
       "idiom" : "universal",
       "platform" : "ios",
       "size" : "1024x1024"
@@ -25,7 +25,7 @@
           "value" : "tinted"
         }
       ],
-      "filename" : "PreConnect-iOS-TintedDark-1024x1024@1x.png",
+      "filename" : "PreConnect-iOS-NoAlpha-TintedDark-1024x1024@1x.png",
       "idiom" : "universal",
       "platform" : "ios",
       "size" : "1024x1024"

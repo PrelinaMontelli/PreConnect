@@ -38,6 +38,7 @@ final class AppViewModel: ObservableObject {
     @Published var isLoading: Bool = false
     @Published var qrPhase: QRScanPhase = .idle
     @Published var cameraError: String?
+    @Published private(set) var isDemoMode: Bool = false
     @Published private(set) var flattenedSensorsCache: [SensorDisplayItem] = []
     @Published private(set) var chartableSensorsCache: [SensorDisplayItem] = []
     @Published private(set) var sensorsByCategoryCache: [(category: SensorCategory, sensors: [SensorDisplayItem])] = []
@@ -49,6 +50,7 @@ final class AppViewModel: ObservableObject {
     private var telemetryPollingEnabled = true
     private let localDeviceId = UIDevice.current.identifierForVendor?.uuidString ?? UUID().uuidString
     private let localDeviceName = UIDevice.current.name
+    private var demoTick: Double = 0
 
     private struct TelemetryDerivedData: Sendable {
         let flattenedSensors: [SensorDisplayItem]
@@ -220,17 +222,24 @@ final class AppViewModel: ObservableObject {
     // MARK: - 二维码配对
 
     func startQRScanning() {
+        if isDemoMode {
+            disconnect()
+        }
+        debugQR("start scanning")
         cameraError = nil
         qrPhase = .scanning
     }
 
     func handleQRFound(_ raw: String) {
+        debugQR("raw payload received, length=\(raw.count), preview=\(sanitizedPreview(raw))")
         UIImpactFeedbackGenerator(style: .medium).impactOccurred()
         do {
             let payload = try QRPayload.parse(from: raw)
+            debugQR("payload parsed, host=\(payload.endpointURL.host ?? "nil"), expiresIn=\(Int(payload.secondsUntilExpiry))s")
             qrPhase = .pairing(payload)
             Task { await pairWithQR(payload: payload) }
         } catch {
+            debugQR("payload parse failed: \(error.localizedDescription)")
             qrPhase = .failed(error.localizedDescription)
         }
     }
@@ -247,6 +256,7 @@ final class AppViewModel: ObservableObject {
 
     func pairWithQR(payload: QRPayload) async {
         do {
+            debugQR("pair direct start, endpoint=\(payload.endpointURL.absoluteString)")
             let pairReq = PairRequest(
                 pin: payload.pin,
                 deviceId: localDeviceId,
@@ -254,6 +264,7 @@ final class AppViewModel: ObservableObject {
                 rotatingKey: payload.rotatingKey
             )
             let response = try await client.pairDirect(endpoint: payload.endpointURL, payload: pairReq)
+            debugQR("pair direct success, server=\(response.serverName), device=\(response.deviceId)")
 
             let endpointURL = URL(string: response.endpoint) ?? payload.serviceBaseURL
             let expiresAt = ISO8601DateFormatter().date(from: response.sessionTokenExpiresUtc ?? "")
@@ -282,6 +293,7 @@ final class AppViewModel: ObservableObject {
             await refreshTelemetryOnce(showLoadingIndicator: false)
 
         } catch let err as APIClientError {
+            debugQR("pair direct failed(APIClientError): \(err.localizedDescription)")
             switch err {
             case .pinOrKeyInvalid:
                 qrPhase = .failed("PIN 或密钥已失效，请刷新二维码后重试")
@@ -291,6 +303,7 @@ final class AppViewModel: ObservableObject {
                 qrPhase = .failed(err.localizedDescription)
             }
         } catch let err as URLError {
+            debugQR("pair direct failed(URLError): \(err.code.rawValue) \(err.localizedDescription)")
             switch err.code {
             case .notConnectedToInternet, .networkConnectionLost, .timedOut:
                 qrPhase = .failed("网络不可达，请检查 Wi-Fi 连接后重试")
@@ -298,14 +311,59 @@ final class AppViewModel: ObservableObject {
                 qrPhase = .failed(err.localizedDescription)
             }
         } catch {
+            debugQR("pair direct failed(unknown): \(error.localizedDescription)")
             qrPhase = .failed(error.localizedDescription)
         }
+    }
+
+    private func sanitizedPreview(_ raw: String, maxLength: Int = 180) -> String {
+        let compact = raw
+            .replacingOccurrences(of: "\n", with: "")
+            .replacingOccurrences(of: "\r", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if compact.count <= maxLength {
+            return compact
+        }
+
+        return String(compact.prefix(maxLength)) + "..."
+    }
+
+    private func debugQR(_ message: String) {
+#if DEBUG
+        print("[QR][AppViewModel] \(message)")
+#endif
     }
 
     // MARK: - 遥测数据
 
     func refreshTelemetryOnce(showLoadingIndicator: Bool = false) async {
         guard let session else { return }
+
+        if isDemoMode {
+            if showLoadingIndicator {
+                isLoading = true
+            }
+            errorMessage = nil
+
+            let snapshot = generateDemoSnapshot()
+            let existingHistory = sensorHistory
+            let derived = await Task.detached(priority: .userInitiated) {
+                Self.deriveTelemetryData(snapshot: snapshot, existingHistory: existingHistory)
+            }.value
+
+            self.snapshot = snapshot
+            self.lastUpdatedAt = derived.updatedAt
+            self.sensorHistory = derived.history
+            self.flattenedSensorsCache = derived.flattenedSensors
+            self.chartableSensorsCache = derived.chartableSensors
+            self.sensorsByCategoryCache = derived.sensorsByCategory
+
+            if showLoadingIndicator {
+                isLoading = false
+            }
+            return
+        }
 
         do {
             if showLoadingIndicator {
@@ -355,6 +413,8 @@ final class AppViewModel: ObservableObject {
         pollTask?.cancel()
         pollTask = nil
         telemetryPollingEnabled = false
+        isDemoMode = false
+        demoTick = 0
         session = nil
         snapshot = nil
         sensorHistory = [:]
@@ -369,6 +429,8 @@ final class AppViewModel: ObservableObject {
         pollTask?.cancel()
         pollTask = nil
         telemetryPollingEnabled = false
+        isDemoMode = false
+        demoTick = 0
         session = nil
         snapshot = nil
         status = nil
@@ -404,6 +466,157 @@ final class AppViewModel: ObservableObject {
         if isLoading {
             isLoading = false
         }
+    }
+
+    func startReviewDemoMode() {
+        pollTask?.cancel()
+        pollTask = nil
+
+        let expiresAt = Calendar.current.date(byAdding: .day, value: 7, to: Date())
+        let endpoint = URL(string: "https://demo.preconnect.local/")!
+
+        session = SessionInfo(
+            token: "review-demo-\(UUID().uuidString)",
+            expiresAt: expiresAt,
+            serverName: "PreConnect演示主机",
+            endpoint: endpoint,
+            deviceId: localDeviceId,
+            deviceName: localDeviceName
+        )
+
+        status = nil
+        errorMessage = nil
+        qrPhase = .idle
+        isDemoMode = true
+        telemetryPollingEnabled = true
+        demoTick = 0
+
+        startPolling()
+        Task {
+            await refreshTelemetryOnce(showLoadingIndicator: true)
+        }
+    }
+
+    private func generateDemoSnapshot() -> HardwareSnapshot {
+        demoTick += max(pollingInterval, 0.5)
+        let t = demoTick
+
+        func wave(_ base: Double, _ amplitude: Double, period: Double, phase: Double = 0) -> Double {
+            base + amplitude * sin((t / period) + phase)
+        }
+
+        func clamp(_ value: Double, min minValue: Double, max maxValue: Double) -> Double {
+            Swift.min(Swift.max(value, minValue), maxValue)
+        }
+
+        func sensor(
+            _ id: String,
+            _ name: String,
+            _ type: Int,
+            _ value: Double,
+            min minValue: Double,
+            max maxValue: Double,
+            path: String,
+            index: Int
+        ) -> SensorReading {
+            SensorReading(
+                sensorId: id,
+                sensorName: name,
+                sensorType: type,
+                value: value,
+                min: minValue,
+                max: maxValue,
+                hardwarePath: path,
+                index: index
+            )
+        }
+
+        let cpuTemp = clamp(wave(62, 9, period: 7), min: 38, max: 95)
+        let cpuLoad = clamp(wave(48, 28, period: 4, phase: 0.8), min: 8, max: 99)
+        let cpuPackagePower = clamp(wave(70, 20, period: 6, phase: 0.2), min: 15, max: 145)
+        let cpuClock = clamp(wave(3980, 520, period: 5, phase: 0.4), min: 2800, max: 5300)
+
+        let gpuTemp = clamp(wave(58, 11, period: 8, phase: 0.6), min: 34, max: 92)
+        let gpuLoad = clamp(wave(54, 35, period: 3.6, phase: 1.1), min: 5, max: 99)
+        let gpuPower = clamp(wave(112, 35, period: 5.5, phase: 0.9), min: 35, max: 280)
+        let gpuClock = clamp(wave(1800, 260, period: 4.5, phase: 0.5), min: 900, max: 2600)
+
+        let memoryLoad = clamp(wave(63, 8, period: 10, phase: 0.3), min: 40, max: 88)
+        let memoryUsedGb = clamp(wave(20, 3.2, period: 9, phase: 1.3), min: 12, max: 28)
+        let fanRpm = clamp(wave(1450, 380, period: 6.2, phase: 0.75), min: 780, max: 2600)
+
+        let diskTemp = clamp(wave(43, 5, period: 11, phase: 0.2), min: 30, max: 60)
+        let diskLoad = clamp(wave(36, 30, period: 3.9, phase: 1.7), min: 1, max: 95)
+
+        let cpu = HardwareComponent(
+            hardwareId: "demo-cpu-0",
+            hardwareName: "CPU Package",
+            hardwareType: 2,
+            manufacturer: "PreConnect Labs",
+            sensors: [
+                sensor("demo.cpu.temp", "CPU 温度", 4, cpuTemp, min: 0, max: 100, path: "CPU/Package", index: 0),
+                sensor("demo.cpu.load", "CPU 占用", 5, cpuLoad, min: 0, max: 100, path: "CPU/Package", index: 1),
+                sensor("demo.cpu.power", "CPU 功耗", 2, cpuPackagePower, min: 0, max: 200, path: "CPU/Package", index: 2),
+                sensor("demo.cpu.clock", "CPU 频率", 14, cpuClock, min: 0, max: 6000, path: "CPU/Package", index: 3)
+            ],
+            children: [],
+            properties: nil
+        )
+
+        let gpu = HardwareComponent(
+            hardwareId: "demo-gpu-0",
+            hardwareName: "GPU",
+            hardwareType: 5,
+            manufacturer: "PreConnect Labs",
+            sensors: [
+                sensor("demo.gpu.temp", "GPU 温度", 4, gpuTemp, min: 0, max: 100, path: "GPU", index: 0),
+                sensor("demo.gpu.load", "GPU 占用", 5, gpuLoad, min: 0, max: 100, path: "GPU", index: 1),
+                sensor("demo.gpu.power", "GPU 功耗", 2, gpuPower, min: 0, max: 350, path: "GPU", index: 2),
+                sensor("demo.gpu.clock", "GPU 频率", 14, gpuClock, min: 0, max: 3000, path: "GPU", index: 3)
+            ],
+            children: [],
+            properties: nil
+        )
+
+        let memory = HardwareComponent(
+            hardwareId: "demo-memory-0",
+            hardwareName: "内存",
+            hardwareType: 3,
+            manufacturer: "PreConnect Labs",
+            sensors: [
+                sensor("demo.mem.load", "内存占用", 5, memoryLoad, min: 0, max: 100, path: "Memory", index: 0),
+                sensor("demo.mem.used", "内存已用", 3, memoryUsedGb, min: 0, max: 32, path: "Memory", index: 1)
+            ],
+            children: [],
+            properties: nil
+        )
+
+        let cooling = HardwareComponent(
+            hardwareId: "demo-fan-0",
+            hardwareName: "散热系统",
+            hardwareType: 7,
+            manufacturer: "PreConnect Labs",
+            sensors: [
+                sensor("demo.fan.rpm", "风扇转速", 7, fanRpm, min: 0, max: 3200, path: "Cooling", index: 0)
+            ],
+            children: [],
+            properties: nil
+        )
+
+        let storage = HardwareComponent(
+            hardwareId: "demo-ssd-0",
+            hardwareName: "固态硬盘",
+            hardwareType: 4,
+            manufacturer: "PreConnect Labs",
+            sensors: [
+                sensor("demo.disk.temp", "SSD 温度", 4, diskTemp, min: 0, max: 100, path: "Storage", index: 0),
+                sensor("demo.disk.load", "磁盘占用", 5, diskLoad, min: 0, max: 100, path: "Storage", index: 1)
+            ],
+            children: [],
+            properties: nil
+        )
+
+        return HardwareSnapshot(components: [cpu, gpu, memory, cooling, storage])
     }
 
     func updatePollingInterval(_ seconds: TimeInterval) {

@@ -8,6 +8,7 @@
 import SwiftUI
 import Charts
 import Combine
+import Darwin
 
 private enum AppSection: Hashable {
     case setup
@@ -268,6 +269,12 @@ private struct SidebarView: View {
                             .font(.headline)
                     }
 
+                    if vm.isDemoMode {
+                        Label("演示主机", systemImage: "sparkles.rectangle.stack")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.orange)
+                    }
+
                     if let session = vm.session {
                         Text(session.serverName)
                             .font(.subheadline.weight(.medium))
@@ -308,6 +315,14 @@ private struct SetupWorkspaceView: View {
                         onScanTap: {
                             vm.startQRScanning()
                             showScanner = true
+                        },
+                        onStartReviewDemoTap: {
+                            vm.startReviewDemoMode()
+                        },
+                        onManualPayloadSubmit: { raw in
+                            vm.startQRScanning()
+                            vm.handleQRFound(raw)
+                            showScanner = true
                         }
                     )
 
@@ -323,9 +338,14 @@ private struct SetupWorkspaceView: View {
 
 private struct SetupPairingFocusView: View {
     @Environment(\.colorScheme) private var colorScheme
+    @State private var isDrawOnActive = true
+    @State private var showManualPayloadSheet = false
+    @State private var manualPayloadInput = ""
 
     let isPaired: Bool
     let onScanTap: () -> Void
+    let onStartReviewDemoTap: () -> Void
+    let onManualPayloadSubmit: (String) -> Void
 
     var body: some View {
         VStack(spacing: 28) {
@@ -351,12 +371,79 @@ private struct SetupPairingFocusView: View {
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
             .tint(Color.blue)
+
+            Button(action: onStartReviewDemoTap) {
+                Label("演示主机", systemImage: "sparkles")
+                    .font(.headline.weight(.semibold))
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 14)
+            }
+            .buttonStyle(.bordered)
+            .tint(.orange)
+
+            Text("用于进行演示")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: .infinity)
             
+            if shouldShowManualPairButton {
+                Button {
+                    showManualPayloadSheet = true
+                } label: {
+                    Label("调试：手动输入二维码载荷", systemImage: "keyboard")
+                        .font(.subheadline.weight(.semibold))
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                }
+                .buttonStyle(.bordered)
+                .tint(.secondary)
+            }
+
 
         }
         .frame(maxWidth: 760)
         .padding(.horizontal, 40)
         .padding(.vertical, 44)
+        .sheet(isPresented: $showManualPayloadSheet) {
+            NavigationStack {
+                VStack(alignment: .leading, spacing: 14) {
+                    Text("请粘贴完整二维码 JSON 载荷")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+
+                    TextEditor(text: $manualPayloadInput)
+                        .font(.system(.footnote, design: .monospaced))
+                        .frame(minHeight: 220)
+                        .padding(8)
+                        .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+
+                    Button {
+                        let raw = manualPayloadInput.trimmingCharacters(in: .whitespacesAndNewlines)
+                        guard !raw.isEmpty else { return }
+                        onManualPayloadSubmit(raw)
+                        showManualPayloadSheet = false
+                    } label: {
+                        Label("提交并配对", systemImage: "link.badge.plus")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(manualPayloadInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                    Spacer(minLength: 0)
+                }
+                .padding(16)
+                .navigationTitle("手动配对")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("取消") {
+                            showManualPayloadSheet = false
+                        }
+                    }
+                }
+            }
+        }
     }
 
     private var adaptiveTextColor: Color {
@@ -370,13 +457,38 @@ private struct SetupPairingFocusView: View {
                 .font(.system(size: 92, weight: .semibold))
                 .foregroundStyle(Color.blue)
                 .frame(width: 220, height: 220)
-                .symbolEffect(.drawOn.individually, options: .nonRepeating)
+                .symbolEffect(.drawOn.byLayer, options: .nonRepeating, isActive: isDrawOnActive)
+                .onAppear {
+                    isDrawOnActive = true
+                    DispatchQueue.main.async {
+                        isDrawOnActive = false
+                    }
+                }
         } else {
             Image(systemName: "qrcode.viewfinder")
                 .font(.system(size: 92, weight: .semibold))
                 .foregroundStyle(Color.blue)
                 .frame(width: 220, height: 220)
         }
+    }
+
+    private var shouldShowManualPairButton: Bool {
+#if targetEnvironment(simulator)
+        true
+#elseif DEBUG
+        true
+#else
+        isDebuggerAttached
+#endif
+    }
+
+    private var isDebuggerAttached: Bool {
+        var info = kinfo_proc()
+        var size = MemoryLayout<kinfo_proc>.stride
+        var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, getpid()]
+
+        let result = sysctl(&mib, u_int(mib.count), &info, &size, nil, 0)
+        return result == 0 && (info.kp_proc.p_flag & P_TRACED) != 0
     }
 }
 
@@ -391,12 +503,17 @@ private struct DashboardView: View {
         WidgetConfigurationStore.decode(widgetConfigurationsRaw)
     }
 
+    private var activeWidgetConfigurations: [DashboardWidgetConfig] {
+        let activeSensorIDs = Set(vm.chartableSensors.map(\.id))
+        return widgetConfigurations.filter { activeSensorIDs.contains($0.sensorId) }
+    }
+
     private var widgetStates: [DashboardWidgetState] {
-        vm.widgetStates(for: widgetConfigurations)
+        vm.widgetStates(for: activeWidgetConfigurations)
     }
 
     private var layoutResult: DashboardLayoutResult {
-        DashboardLayoutEngine.layout(for: widgetConfigurations)
+        DashboardLayoutEngine.layout(for: activeWidgetConfigurations)
     }
 
     var body: some View {
@@ -427,15 +544,25 @@ private struct DashboardView: View {
             }
         )
         .onAppear {
+            reconcileInvalidWidgetConfigurationsIfNeeded()
             ensureDefaultWidgetsIfNeeded()
         }
         .onChange(of: vm.chartableSensors.map(\.id)) { _, _ in
+            reconcileInvalidWidgetConfigurationsIfNeeded()
             ensureDefaultWidgetsIfNeeded()
         }
     }
 
+    private func reconcileInvalidWidgetConfigurationsIfNeeded() {
+        if activeWidgetConfigurations.count == widgetConfigurations.count {
+            return
+        }
+
+        widgetConfigurationsRaw = WidgetConfigurationStore.encode(activeWidgetConfigurations)
+    }
+
     private func ensureDefaultWidgetsIfNeeded() {
-        guard widgetConfigurations.isEmpty else { return }
+        guard activeWidgetConfigurations.isEmpty else { return }
         let defaults = vm.defaultWidgetConfigs()
         guard !defaults.isEmpty else { return }
         widgetConfigurationsRaw = WidgetConfigurationStore.encode(defaults)
@@ -1140,11 +1267,17 @@ private struct SettingsView: View {
                         StatusFactRow(title: "会话到期", value: expiresAt.formatted(date: .numeric, time: .shortened), symbolName: "clock.fill")
                     }
 
+                    if vm.isDemoMode {
+                        Text("当前连接为演示模式")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                    }
+
                     Button(role: .destructive) {
                         frozenSession = nil
                         vm.disconnect()
                     } label: {
-                        Label("断开当前会话", systemImage: "xmark.circle.fill")
+                        Label(vm.isDemoMode ? "退出演示模式" : "断开当前会话", systemImage: "xmark.circle.fill")
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.borderedProminent)
@@ -1751,7 +1884,9 @@ private struct SetupPairingFocusPreviewPlayground: View {
 
             SetupPairingFocusView(
                 isPaired: isPaired,
-                onScanTap: { scanTapCount += 1 }
+                onScanTap: { scanTapCount += 1 },
+                onStartReviewDemoTap: { },
+                onManualPayloadSubmit: { _ in }
             )
         }
         .padding(20)

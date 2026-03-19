@@ -118,6 +118,10 @@ struct QRScannerView: UIViewControllerRepresentable {
             guard case .barcode(let code) = item,
                   let payload = code.payloadStringValue else { return }
             fired = true
+#if DEBUG
+            let preview = payload.count > 160 ? String(payload.prefix(160)) + "..." : payload
+            print("[QR][Scanner] payload captured, length=\(payload.count), preview=\(preview)")
+#endif
             onFound(payload)
         }
 
